@@ -1,0 +1,1 @@
+"""StockUp backend application."""
