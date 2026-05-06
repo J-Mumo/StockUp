@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     scraper_base_url: str = "https://afx.kwayisi.org/ngse/"
     kenyanstocks_enabled: bool = True
 
+    # AI Financial Enrichment
+    ai_provider: str = "openai"  # "openai" or "anthropic"
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
+    ai_model: str = ""  # Leave blank for provider default
+
     # Scheduled Jobs
     price_fetch_hour: int = 18
     valuation_calc_hour: int = 19

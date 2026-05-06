@@ -237,6 +237,34 @@ def cmd_compute_valuations(ticker: str = None):
         db.close()
 
 
+def cmd_enrich_financials(ticker: str = None, delay: float = 2.0):
+    """Enrich financial data using AI (fill in FCF, CapEx, etc.)."""
+    from app.database import SessionLocal
+    from app.data.ai_enrichment import enrich_company_financials, enrich_all_companies
+    from app.models.company import Company
+
+    db = SessionLocal()
+    try:
+        if ticker:
+            company = db.query(Company).filter(Company.ticker_symbol == ticker.upper()).first()
+            if not company:
+                print(f"  Company '{ticker}' not found.")
+                return
+            print(f"  Enriching financials for {company.ticker_symbol} via AI...")
+            result = enrich_company_financials(db, company)
+            if result["status"] == "success":
+                print(f"  Done! Updated: {result['updated']}, Inserted: {result['inserted']}")
+            else:
+                print(f"  Error: {result.get('error', 'unknown')}")
+        else:
+            print("  Enriching financials for all companies via AI...")
+            print(f"  Provider: {__import__('app.config', fromlist=['get_settings']).get_settings().ai_provider}")
+            results = enrich_all_companies(db, delay=delay)
+            print(f"\n  Done! Success: {results['success']}/{results['total']}, Errors: {results['errors']}")
+    finally:
+        db.close()
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python -m cli.commands <command> [options]")
@@ -248,6 +276,8 @@ def main():
         print("  backfill-kenyanstocks --ticker SCOM   Backfill specific company")
         print("  backfill-financials   Backfill financial statements from kenyanstocks.com")
         print("  backfill-financials --ticker SCOM   Backfill specific company")
+        print("  enrich-financials     Fill missing data (FCF, CapEx) using AI")
+        print("  enrich-financials --ticker SCOM   Enrich specific company")
         print("  compute-valuations    Compute intrinsic valuations for all companies")
         print("  compute-valuations --ticker SCOM   Compute for specific company")
         print("  update-prices-daily   Fetch today's prices")
@@ -302,6 +332,18 @@ def main():
             if idx + 1 < len(sys.argv):
                 ticker = sys.argv[idx + 1]
         cmd_compute_valuations(ticker=ticker)
+    elif command == "enrich-financials":
+        ticker = None
+        delay = 2.0
+        if "--ticker" in sys.argv:
+            idx = sys.argv.index("--ticker")
+            if idx + 1 < len(sys.argv):
+                ticker = sys.argv[idx + 1]
+        if "--delay" in sys.argv:
+            idx = sys.argv.index("--delay")
+            if idx + 1 < len(sys.argv):
+                delay = float(sys.argv[idx + 1])
+        cmd_enrich_financials(ticker=ticker, delay=delay)
     elif command == "update-prices-daily":
         cmd_update_daily()
     elif command == "import-csv":
