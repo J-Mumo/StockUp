@@ -16,6 +16,7 @@ import type {
   WatchlistItem,
   DashboardSummary,
   AnalysisSnapshot,
+  ValuationTrendPoint,
 } from '../types';
 
 // Auth
@@ -43,6 +44,8 @@ export const stocksApi = {
     api.put<FinancialStatement>(`/stocks/companies/${companyId}/financials/${financialId}`, data),
   deleteFinancial: (companyId: number, financialId: number) =>
     api.delete(`/stocks/companies/${companyId}/financials/${financialId}`),
+  getValuationTrend: (id: number, days?: number) =>
+    api.get<ValuationTrendPoint[]>(`/stocks/companies/${id}/valuation-trend`, { params: { days } }),
 };
 
 // Analysis

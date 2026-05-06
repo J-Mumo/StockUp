@@ -224,3 +224,10 @@ export interface AnalysisSnapshot {
   created_at: string;
   company?: Company;
 }
+
+export interface ValuationTrendPoint {
+  date: string;
+  market_price: number | null;
+  intrinsic_value: number | null;
+  margin_of_safety_pct: number | null;
+}

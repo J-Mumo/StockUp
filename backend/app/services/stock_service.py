@@ -514,3 +514,84 @@ def get_latest_valuation(
         return "no_valuation"
 
     return _valuation_to_schema(latest)
+
+
+def get_valuation_trend(
+    db: Session, company_id: int, days: int = 365
+) -> list[dict]:
+    """Get valuation history merged with price history for trend chart.
+
+    Returns a list of data points with date, market_price, and intrinsic_value.
+    Prices come from daily price_history; IV comes from intrinsic_values table.
+    IV is forward-filled across daily price dates for chart rendering.
+    """
+    from datetime import timedelta
+
+    cutoff = date.today() - timedelta(days=days)
+
+    # Get price history for the period
+    prices = (
+        db.query(PriceHistory)
+        .filter(
+            PriceHistory.company_id == company_id,
+            PriceHistory.price_date >= cutoff,
+        )
+        .order_by(PriceHistory.price_date)
+        .all()
+    )
+
+    # Get all valuation points for the period
+    valuations = (
+        db.query(IntrinsicValue)
+        .filter(
+            IntrinsicValue.company_id == company_id,
+            IntrinsicValue.valuation_date >= cutoff,
+        )
+        .order_by(IntrinsicValue.valuation_date)
+        .all()
+    )
+
+    # Build a date → IV map (use latest IV for each date)
+    iv_by_date: dict[date, float] = {}
+    for v in valuations:
+        if v.weighted_intrinsic_value:
+            iv_by_date[v.valuation_date] = float(v.weighted_intrinsic_value)
+
+    # Build the merged time series
+    # Forward-fill IV: carry the most recent IV value forward across price dates
+    result = []
+    current_iv: float | None = None
+
+    # Sort all IV dates to enable forward-fill
+    iv_dates_sorted = sorted(iv_by_date.keys())
+
+    for price in prices:
+        # Update current_iv if there's a valuation on or before this price date
+        for iv_date in iv_dates_sorted:
+            if iv_date <= price.price_date:
+                current_iv = iv_by_date[iv_date]
+            else:
+                break
+
+        mos = None
+        if current_iv and price.close_price and current_iv > 0:
+            mos = (current_iv - float(price.close_price)) / current_iv
+
+        result.append({
+            "date": price.price_date,
+            "market_price": float(price.close_price) if price.close_price else None,
+            "intrinsic_value": current_iv,
+            "margin_of_safety_pct": round(mos, 4) if mos is not None else None,
+        })
+
+    # If no prices but we have valuations, return valuation points alone
+    if not result and valuations:
+        for v in valuations:
+            result.append({
+                "date": v.valuation_date,
+                "market_price": float(v.current_market_price) if v.current_market_price else None,
+                "intrinsic_value": float(v.weighted_intrinsic_value) if v.weighted_intrinsic_value else None,
+                "margin_of_safety_pct": float(v.margin_of_safety_pct) if v.margin_of_safety_pct else None,
+            })
+
+    return result

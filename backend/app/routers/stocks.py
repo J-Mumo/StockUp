@@ -20,6 +20,7 @@ from app.schemas.stocks import (
     FinancialStatementUpdate,
     MarketResponse,
     PriceRecord,
+    ValuationHistoryPoint,
     ValuationResponse,
 )
 from app.services import stock_service
@@ -183,6 +184,23 @@ def list_valuations(company_id: int, db: Session = Depends(get_db)):
     if result is None:
         raise HTTPException(status_code=404, detail="Company not found")
     return result
+
+
+@router.get(
+    "/companies/{company_id}/valuation-trend",
+    response_model=list[ValuationHistoryPoint],
+)
+def get_valuation_trend(
+    company_id: int,
+    days: int = 365,
+    db: Session = Depends(get_db),
+):
+    """Get merged price + intrinsic value history for trend chart.
+
+    Returns daily data points with market_price and forward-filled intrinsic_value.
+    Use days parameter to control lookback period (default: 365 days).
+    """
+    return stock_service.get_valuation_trend(db, company_id, days=days)
 
 
 @router.get(

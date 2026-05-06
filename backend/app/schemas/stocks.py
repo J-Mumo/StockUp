@@ -210,5 +210,15 @@ class ValuationResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ValuationHistoryPoint(BaseModel):
+    """A single data point for the valuation trends chart."""
+    date: date
+    market_price: float | None = None
+    intrinsic_value: float | None = None
+    margin_of_safety_pct: float | None = None
+
+    model_config = {"from_attributes": True}
+
+
 # Needed so CompanyDetail can reference ValuationResponse
 CompanyDetail.model_rebuild()
