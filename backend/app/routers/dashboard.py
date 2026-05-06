@@ -266,7 +266,7 @@ def _get_top_undervalued(db: Session, limit: int = 5) -> list[TopMover]:
         top_movers.append(TopMover(
             company_id=company.id,
             ticker=company.ticker_symbol,
-            company_name=company.company_name,
+            company_name=company.name,
             margin_of_safety_pct=round(float(iv.margin_of_safety_pct) * 100, 1),
             intrinsic_value=round(float(iv.weighted_intrinsic_value), 2) if iv.weighted_intrinsic_value else None,
             market_price=round(float(iv.current_market_price), 2) if iv.current_market_price else None,
