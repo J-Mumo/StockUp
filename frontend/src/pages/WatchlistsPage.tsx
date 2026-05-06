@@ -204,7 +204,7 @@ export default function WatchlistsPage() {
                         </Link>
                       </td>
                       <td className="py-3 text-gray-400 font-mono text-sm">
-                        {item.company?.symbol || '—'}
+                        {item.company?.ticker_symbol || '—'}
                       </td>
                       <td className="py-3 text-gray-400 text-sm">{item.notes || '—'}</td>
                       <td className="py-3 text-gray-500 text-sm">
@@ -284,7 +284,7 @@ export default function WatchlistsPage() {
                 >
                   <option value="">Select company</option>
                   {companies.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name} ({c.symbol})</option>
+                    <option key={c.id} value={c.id}>{c.name} ({c.ticker_symbol})</option>
                   ))}
                 </select>
               </div>

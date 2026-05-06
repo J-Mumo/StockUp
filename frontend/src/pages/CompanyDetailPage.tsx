@@ -89,7 +89,7 @@ export default function CompanyDetailPage() {
         <div className="flex-1">
           <h1 className="text-2xl font-bold text-white">{company.name}</h1>
           <p className="text-gray-400">
-            {company.symbol} {company.sector && `• ${company.sector}`}
+            {company.ticker_symbol} {company.sector && `• ${company.sector}`}
           </p>
         </div>
         {recommendation && recommendation.action && (

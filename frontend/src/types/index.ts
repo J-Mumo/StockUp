@@ -21,14 +21,17 @@ export interface Market {
 
 export interface Company {
   id: number;
-  symbol: string;
+  ticker_symbol: string;
   name: string;
   sector: string | null;
-  industry: string | null;
-  market_id: number;
-  market_cap: number | null;
-  description: string | null;
-  market?: Market;
+  is_active: boolean;
+  latest_price: number | null;
+  latest_change_pct: number | null;
+  latest_price_date: string | null;
+  intrinsic_value: number | null;
+  margin_of_safety_pct: number | null;
+  recommendation: string | null;
+  index_membership: string | null; // "NSE 20", "NSE 25", or null
 }
 
 export interface PriceHistory {

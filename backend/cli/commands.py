@@ -198,6 +198,45 @@ def cmd_backfill_financials(ticker: str = None, delay: float = 1.5):
         db.close()
 
 
+def cmd_compute_valuations(ticker: str = None):
+    """Compute intrinsic valuations for all companies (or a single ticker)."""
+    from app.database import SessionLocal
+    from app.services.valuation_engine import compute_valuation, compute_all_valuations, ValuationResult
+    from app.models.company import Company
+
+    db = SessionLocal()
+    try:
+        if ticker:
+            company = db.query(Company).filter(Company.ticker_symbol == ticker.upper()).first()
+            if not company:
+                print(f"  Company '{ticker}' not found.")
+                return
+            print(f"  Computing valuation for {company.ticker_symbol}...", end=" ", flush=True)
+            try:
+                result = compute_valuation(db, company.id)
+                db.commit()
+                if result and result.weighted_intrinsic_value:
+                    print(f"IV={result.weighted_intrinsic_value:.2f}, MoS={result.margin_of_safety:.1f}%")
+                else:
+                    print("Insufficient data")
+            except Exception as e:
+                print(f"Error: {e}")
+        else:
+            print("  Computing valuations for all companies...")
+            results = compute_all_valuations(db)
+            computed = sum(1 for v in results.values() if isinstance(v, ValuationResult))
+            errors = [(k, v) for k, v in results.items() if isinstance(v, str)]
+            print(f"\n  Done! Computed: {computed}, Errors: {len(errors)}, Total: {len(results)}")
+            if errors:
+                print("  Errors:")
+                for company_id, err in errors[:10]:
+                    print(f"    - Company #{company_id}: {err}")
+                if len(errors) > 10:
+                    print(f"    ... and {len(errors) - 10} more")
+    finally:
+        db.close()
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python -m cli.commands <command> [options]")
@@ -207,8 +246,10 @@ def main():
         print("  backfill-prices --ticker SCOM   Backfill for a specific company")
         print("  backfill-kenyanstocks Backfill from kenyanstocks.com (~248 days OHLCV)")
         print("  backfill-kenyanstocks --ticker SCOM   Backfill specific company")
-        print("  backfill-financials   Backfill financial statements from Yahoo Finance")
+        print("  backfill-financials   Backfill financial statements from kenyanstocks.com")
         print("  backfill-financials --ticker SCOM   Backfill specific company")
+        print("  compute-valuations    Compute intrinsic valuations for all companies")
+        print("  compute-valuations --ticker SCOM   Compute for specific company")
         print("  update-prices-daily   Fetch today's prices")
         print("  import-csv            Import historical prices from CSV archive")
         print("  import-csv --dir PATH Import from a specific directory")
@@ -254,6 +295,13 @@ def main():
             if idx + 1 < len(sys.argv):
                 delay = float(sys.argv[idx + 1])
         cmd_backfill_financials(ticker=ticker, delay=delay)
+    elif command == "compute-valuations":
+        ticker = None
+        if "--ticker" in sys.argv:
+            idx = sys.argv.index("--ticker")
+            if idx + 1 < len(sys.argv):
+                ticker = sys.argv[idx + 1]
+        cmd_compute_valuations(ticker=ticker)
     elif command == "update-prices-daily":
         cmd_update_daily()
     elif command == "import-csv":

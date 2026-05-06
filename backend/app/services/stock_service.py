@@ -26,6 +26,23 @@ from app.schemas.stocks import (
 
 
 # ---------------------------------------------------------------------------
+# NSE Index Constituents (as of 2025)
+# ---------------------------------------------------------------------------
+
+NSE_20_TICKERS = {
+    "SCOM", "EQTY", "KCB", "ABSA", "COOP", "SCBK", "BAT", "EABL", "BAMB",
+    "KNRE", "LKNL", "KQ", "SBIC", "NCBA", "DIAM", "TOTL", "NMG", "CARB",
+    "KEGN", "CTUM",
+}
+
+NSE_25_TICKERS = {
+    "SCOM", "EQTY", "KCB", "ABSA", "COOP", "SCBK", "EABL", "BAMB",
+    "BAT", "KNRE", "NCBA", "DIAM", "KQ", "SBIC", "CTUM", "LKNL",
+    "TOTL", "NMG", "KEGN", "CARB", "BRIT", "JUB", "KUKZ", "LIMT", "BKG",
+}
+
+
+# ---------------------------------------------------------------------------
 # Markets
 # ---------------------------------------------------------------------------
 
@@ -86,16 +103,59 @@ def _latest_price_map(
     return {p.company_id: p for p in latest_prices}
 
 
+def _latest_valuation_map(
+    db: Session, company_ids: list[int]
+) -> dict[int, IntrinsicValue]:
+    """Build a company_id → latest IntrinsicValue mapping."""
+    if not company_ids:
+        return {}
+
+    latest_date_subq = (
+        db.query(
+            IntrinsicValue.company_id,
+            func.max(IntrinsicValue.valuation_date).label("max_date"),
+        )
+        .filter(IntrinsicValue.company_id.in_(company_ids))
+        .group_by(IntrinsicValue.company_id)
+        .subquery()
+    )
+
+    latest_vals: Sequence[IntrinsicValue] = (
+        db.query(IntrinsicValue)
+        .join(
+            latest_date_subq,
+            (IntrinsicValue.company_id == latest_date_subq.c.company_id)
+            & (IntrinsicValue.valuation_date == latest_date_subq.c.max_date),
+        )
+        .all()
+    )
+    return {v.company_id: v for v in latest_vals}
+
+
+def _get_index_membership(ticker: str) -> str | None:
+    """Determine NSE index membership for a ticker."""
+    if ticker in NSE_20_TICKERS:
+        return "NSE 20"
+    if ticker in NSE_25_TICKERS:
+        return "NSE 25"
+    return None
+
+
 def _enrich_companies(
     db: Session, companies: Sequence[Company]
 ) -> list[CompanyListItem]:
-    """Attach latest price data to a list of companies."""
+    """Attach latest price data, valuation info, and index membership."""
     if not companies:
         return []
-    price_map = _latest_price_map(db, [c.id for c in companies])
+
+    company_ids = [c.id for c in companies]
+    price_map = _latest_price_map(db, company_ids)
+    valuation_map = _latest_valuation_map(db, company_ids)
+
     results: list[CompanyListItem] = []
     for company in companies:
         price = price_map.get(company.id)
+        val = valuation_map.get(company.id)
         results.append(
             CompanyListItem(
                 id=company.id,
@@ -110,6 +170,18 @@ def _enrich_companies(
                     else None
                 ),
                 latest_price_date=price.price_date if price else None,
+                intrinsic_value=(
+                    float(val.weighted_intrinsic_value)
+                    if val and val.weighted_intrinsic_value
+                    else None
+                ),
+                margin_of_safety_pct=(
+                    float(val.margin_of_safety_pct)
+                    if val and val.margin_of_safety_pct
+                    else None
+                ),
+                recommendation=val.recommendation if val else None,
+                index_membership=_get_index_membership(company.ticker_symbol),
             )
         )
     return results

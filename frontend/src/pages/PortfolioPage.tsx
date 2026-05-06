@@ -348,7 +348,7 @@ export default function PortfolioPage() {
                     >
                       <option value="">Select company</option>
                       {companies.map((c) => (
-                        <option key={c.id} value={c.id}>{c.name} ({c.symbol})</option>
+                        <option key={c.id} value={c.id}>{c.name} ({c.ticker_symbol})</option>
                       ))}
                     </select>
                   </div>

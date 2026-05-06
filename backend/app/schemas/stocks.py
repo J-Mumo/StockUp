@@ -37,6 +37,10 @@ class CompanyListItem(BaseModel):
     latest_price: float | None = None
     latest_change_pct: float | None = None
     latest_price_date: date | None = None
+    intrinsic_value: float | None = None
+    margin_of_safety_pct: float | None = None
+    recommendation: str | None = None
+    index_membership: str | None = None  # "NSE 20", "NSE 25", or null
 
     model_config = {"from_attributes": True}
 
