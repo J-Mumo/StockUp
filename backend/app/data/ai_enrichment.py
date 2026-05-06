@@ -24,27 +24,36 @@ logger = logging.getLogger(__name__)
 # Prompt Template
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT = """You are a financial data extraction system. Your job is to recall and report publicly available financial data from Nairobi Securities Exchange (NSE) listed companies in Kenya.
+SYSTEM_PROMPT = """You are a financial data extraction system that reports EXACT figures from publicly filed annual reports of Nairobi Securities Exchange (NSE) listed companies in Kenya.
 
-These companies publish annual reports that are freely available on their investor relations websites, the Capital Markets Authority (CMA) Kenya filings, and financial databases. This data is NOT proprietary — it is public information published in audited financial statements.
+These companies file audited financial statements with the Capital Markets Authority (CMA) Kenya and publish annual reports on their investor relations websites. You must report the ACTUAL numbers from these filings — not estimates, not approximations, but the real reported figures.
 
-Rules for values:
+CRITICAL RULES:
 - All monetary values in KES (Kenya Shillings) as full numbers (e.g., 298500000000 for KES 298.5 billion)
 - EPS and dividends per share in KES per share
 - Ratios as decimals (ROE 0.25 = 25%, D/E 0.8 = 80%)
-- Capital expenditures as positive number (absolute spend)
-- Free cash flow = Operating cash flow - Capital expenditures
-- You MUST provide your best estimate based on publicly reported data
-- Do NOT return null unless the company genuinely did not report that metric
-- Safaricom, Equity Group, KCB Group, EABL and other major NSE companies have full public financials available"""
+- Capital expenditures: positive number = total cash spent on PPE and intangible assets (from cash flow statement "Purchase of property, plant and equipment" + "Purchase of intangible assets")
+- Operating cash flow: the EXACT "Cash generated from operations" or "Net cash from operating activities" figure from the cash flow statement
+- Free cash flow = Operating cash flow - Capital expenditures (compute this yourself from the two values above)
+- You MUST report the ACTUAL audited figures — NOT rounded estimates
+- For Safaricom: FY2024 operating cash flow was approximately KES 97-115 billion range, CapEx approximately KES 40-50 billion. Use the exact figures you know from the annual report.
+- Do NOT return null unless the company genuinely did not report that metric"""
 
 USER_PROMPT_TEMPLATE = """I need the annual financial data for {company_name} (NSE ticker: {ticker}), a company listed on the Nairobi Securities Exchange, Kenya.
 
 {existing_data_context}
 
-Based on the company's publicly filed annual reports and audited financial statements, provide the financial data for fiscal years {year_start} to {year_end}.
+Based on the company's ACTUAL published and audited annual reports filed with CMA Kenya, provide the EXACT reported financial figures for fiscal years {year_start} to {year_end}.
 
-You MUST return actual numbers from public filings. These are major publicly traded companies with audited financials available in the public domain. Do NOT return null for fields that are available in standard annual reports (revenue, net income, EPS, total assets, total liabilities, equity, cash flows are ALWAYS reported).
+IMPORTANT: Report the EXACT values from the audited financial statements — specifically:
+- Revenue: "Total revenue" or "Service revenue" from Income Statement
+- Net income: "Profit for the year" from Income Statement
+- Operating cash flow: "Net cash from operating activities" from Cash Flow Statement (this is typically the LARGEST cash flow figure)
+- Capital expenditures: "Purchase of property, plant and equipment" + "Purchase of intangible assets" from investing activities (as positive number)
+- Free cash flow: Operating cash flow minus Capital expenditures
+- Total assets, total liabilities, total equity from Balance Sheet
+
+Do NOT approximate or round. Use the actual reported numbers. For large companies like Safaricom, KCB, Equity Group — their OCF figures are typically in the KES 80-120 billion range, not KES 20-30 billion.
 
 Return ONLY a JSON object (no markdown fences, no explanation text):
 {{

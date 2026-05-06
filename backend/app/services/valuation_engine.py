@@ -41,9 +41,11 @@ DEFAULT_ASSUMPTIONS = {
     "projection_years": 10,
     "max_growth_rate_cap": 0.20,    # Cap FCF growth at 20%
     "min_growth_rate_floor": -0.05, # Floor at -5%
-    "dcf_weight": 0.50,
-    "epv_weight": 0.30,
-    "bv_weight": 0.20,
+    "dcf_weight": 1.00,            # Pure DCF when available
+    "epv_weight": 0.00,            # EPV used only as fallback when DCF unavailable
+    "bv_weight": 0.00,             # BV used only as fallback when DCF unavailable
+    "fallback_epv_weight": 0.70,   # When DCF unavailable: EPV weight
+    "fallback_bv_weight": 0.30,    # When DCF unavailable: BV weight
     "min_years_for_dcf": 3,         # Need at least 3 years of FCF data
     "min_years_for_epv": 2,         # Need at least 2 years of net income
     "outlier_std_multiplier": 2.0,  # Remove values > 2 std devs for EPV
@@ -185,8 +187,16 @@ def calculate_dcf(
         result.error = f"Insufficient FCF data: need {min_years} years, have {len(fcf_data)}"
         return result
 
-    # Calculate average growth rate from historical FCF
+    # Calculate growth rate from historical FCF
+    # Use full-period CAGR first; if negative, try recent 3 years for recovery detection
     growth_rate = _calculate_cagr(fcf_data)
+
+    if growth_rate < 0 and len(fcf_data) >= 3:
+        # Full-period growth is negative, check if recent years show recovery
+        recent_cagr = _calculate_cagr(fcf_data[-3:])
+        if recent_cagr > 0:
+            # Use the recent recovery growth rate (more relevant for projections)
+            growth_rate = recent_cagr
 
     # Cap growth rate conservatively
     growth_rate = max(
@@ -374,14 +384,12 @@ def calculate_weighted_intrinsic_value(
     bv_value: float | None,
     assumptions: dict[str, Any] | None = None,
 ) -> tuple[float | None, dict[str, float]]:
-    """Calculate weighted composite intrinsic value.
+    """Calculate intrinsic value — pure DCF when available, fallback to EPV+BV.
 
-    Formula:
-        IV = w_dcf×DCF + w_epv×EPV + w_bv×BV
-
-    Default weights: DCF=0.5, EPV=0.3, BV=0.2
-    If a method is unavailable, redistributes its weight proportionally
-    among available methods.
+    Strategy:
+        - If DCF is available: use 100% DCF (pure DCF valuation)
+        - If DCF unavailable: use EPV (70%) + BV (30%) as fallback
+        - If only one fallback available: use it at 100%
 
     Args:
         dcf_value: DCF intrinsic value per share (or None).
@@ -394,18 +402,20 @@ def calculate_weighted_intrinsic_value(
     """
     params = {**DEFAULT_ASSUMPTIONS, **(assumptions or {})}
 
+    # Primary: Pure DCF when available
+    if dcf_value is not None and dcf_value > 0:
+        return dcf_value, {"dcf": 1.0}
+
+    # Fallback: EPV + BV blend when no DCF
     available: dict[str, float] = {}
     raw_weights: dict[str, float] = {}
 
-    if dcf_value is not None and dcf_value > 0:
-        available["dcf"] = dcf_value
-        raw_weights["dcf"] = params["dcf_weight"]
     if epv_value is not None and epv_value > 0:
         available["epv"] = epv_value
-        raw_weights["epv"] = params["epv_weight"]
+        raw_weights["epv"] = params["fallback_epv_weight"]
     if bv_value is not None and bv_value > 0:
         available["bv"] = bv_value
-        raw_weights["bv"] = params["bv_weight"]
+        raw_weights["bv"] = params["fallback_bv_weight"]
 
     if not available:
         return None, {}
