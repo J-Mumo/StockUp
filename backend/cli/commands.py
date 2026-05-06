@@ -216,7 +216,9 @@ def cmd_compute_valuations(ticker: str = None):
                 result = compute_valuation(db, company.id)
                 db.commit()
                 if result and result.weighted_intrinsic_value:
-                    print(f"IV={result.weighted_intrinsic_value:.2f}, MoS={result.margin_of_safety:.1f}%")
+                    mos = result.margin_of_safety_pct
+                    mos_str = f"{mos * 100:.1f}%" if mos is not None else "N/A"
+                    print(f"IV={result.weighted_intrinsic_value:.2f}, MoS={mos_str}")
                 else:
                     print("Insufficient data")
             except Exception as e:

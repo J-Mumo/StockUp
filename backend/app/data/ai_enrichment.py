@@ -24,45 +24,52 @@ logger = logging.getLogger(__name__)
 # Prompt Template
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT = """You are a financial data analyst specializing in Nairobi Securities Exchange (NSE) listed companies in Kenya. You have deep knowledge of publicly reported financials from annual reports, investor relations pages, and regulatory filings.
+SYSTEM_PROMPT = """You are a financial data extraction system. Your job is to recall and report publicly available financial data from Nairobi Securities Exchange (NSE) listed companies in Kenya.
 
-Your task is to provide accurate, structured financial data for the requested company. All monetary values must be in KES (Kenya Shillings) as raw numbers (not in millions/billions - use full amounts like 44500000000 for 44.5 billion).
+These companies publish annual reports that are freely available on their investor relations websites, the Capital Markets Authority (CMA) Kenya filings, and financial databases. This data is NOT proprietary — it is public information published in audited financial statements.
 
-IMPORTANT:
-- Only provide data you are confident about from public sources
-- If you're uncertain about a value, set it to null
-- Revenue, net income, cash flow values should be full absolute KES amounts
-- Ratios (ROE, D/E) should be decimals (e.g., 0.25 for 25%)
-- EPS and BVPS should be per-share values in KES
-- Capital expenditures should be reported as a positive number (absolute value of cash spent)
-- Free cash flow = Operating cash flow - Capital expenditures"""
+Rules for values:
+- All monetary values in KES (Kenya Shillings) as full numbers (e.g., 298500000000 for KES 298.5 billion)
+- EPS and dividends per share in KES per share
+- Ratios as decimals (ROE 0.25 = 25%, D/E 0.8 = 80%)
+- Capital expenditures as positive number (absolute spend)
+- Free cash flow = Operating cash flow - Capital expenditures
+- You MUST provide your best estimate based on publicly reported data
+- Do NOT return null unless the company genuinely did not report that metric
+- Safaricom, Equity Group, KCB Group, EABL and other major NSE companies have full public financials available"""
 
-USER_PROMPT_TEMPLATE = """Provide the annual financial data for {company_name} (NSE ticker: {ticker}) listed on the Nairobi Securities Exchange for fiscal years {years}.
+USER_PROMPT_TEMPLATE = """I need the annual financial data for {company_name} (NSE ticker: {ticker}), a company listed on the Nairobi Securities Exchange, Kenya.
 
-Return ONLY a JSON object with this exact structure (no markdown, no explanation):
+{existing_data_context}
+
+Based on the company's publicly filed annual reports and audited financial statements, provide the financial data for fiscal years {year_start} to {year_end}.
+
+You MUST return actual numbers from public filings. These are major publicly traded companies with audited financials available in the public domain. Do NOT return null for fields that are available in standard annual reports (revenue, net income, EPS, total assets, total liabilities, equity, cash flows are ALWAYS reported).
+
+Return ONLY a JSON object (no markdown fences, no explanation text):
 {{
   "company": "{ticker}",
   "financials": [
     {{
-      "fiscal_year": 2025,
-      "revenue": <number or null>,
-      "net_income": <number or null>,
-      "earnings_per_share": <number or null>,
-      "total_assets": <number or null>,
-      "total_liabilities": <number or null>,
-      "total_equity": <number or null>,
-      "operating_cash_flow": <number or null>,
-      "capital_expenditures": <number or null>,
-      "free_cash_flow": <number or null>,
-      "dividends_per_share": <number or null>,
-      "return_on_equity": <number or null>,
-      "debt_to_equity": <number or null>,
-      "shares_outstanding": <number or null>
+      "fiscal_year": 2024,
+      "revenue": 354000000000,
+      "net_income": 57000000000,
+      "earnings_per_share": 1.42,
+      "total_assets": 450000000000,
+      "total_liabilities": 280000000000,
+      "total_equity": 170000000000,
+      "operating_cash_flow": 95000000000,
+      "capital_expenditures": 35000000000,
+      "free_cash_flow": 60000000000,
+      "dividends_per_share": 0.65,
+      "return_on_equity": 0.34,
+      "debt_to_equity": 1.65,
+      "shares_outstanding": 40065428000
     }}
   ]
 }}
 
-Provide data for each year from {year_start} to {year_end}. Use null for any values you're not confident about."""
+Provide one entry for EACH year from {year_start} to {year_end}. The example values above are illustrative — use the actual reported figures from {company_name}'s annual reports."""
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +161,53 @@ def _parse_response(response_text: str) -> dict[str, Any] | None:
 # Enrichment Logic
 # ---------------------------------------------------------------------------
 
+def _build_existing_data_context(db: Session, company: Company, year_start: int, year_end: int) -> str:
+    """Build context string showing what data we already have for the company."""
+    existing = (
+        db.query(FinancialStatement)
+        .filter(
+            FinancialStatement.company_id == company.id,
+            FinancialStatement.fiscal_year >= year_start,
+            FinancialStatement.fiscal_year <= year_end,
+        )
+        .order_by(FinancialStatement.fiscal_year.desc())
+        .all()
+    )
+
+    if not existing:
+        return f"We have no existing financial data for {company.name}. Please provide all available data from public annual reports."
+
+    lines = [f"We already have some data for {company.name} from other sources. Here is what we know (fields marked null need to be filled):"]
+    for fs in existing:
+        parts = [f"  FY{fs.fiscal_year}:"]
+        if fs.revenue:
+            parts.append(f"Revenue=KES {fs.revenue:,.0f}")
+        if fs.net_income:
+            parts.append(f"Net Income=KES {fs.net_income:,.0f}")
+        if fs.earnings_per_share:
+            parts.append(f"EPS=KES {fs.earnings_per_share}")
+        if fs.operating_cash_flow:
+            parts.append(f"OCF=KES {fs.operating_cash_flow:,.0f}")
+        if fs.free_cash_flow:
+            parts.append(f"FCF=KES {fs.free_cash_flow:,.0f}")
+        else:
+            parts.append("FCF=MISSING")
+        if fs.capital_expenditures:
+            parts.append(f"CapEx=KES {fs.capital_expenditures:,.0f}")
+        else:
+            parts.append("CapEx=MISSING")
+        if fs.total_equity:
+            parts.append(f"Equity=KES {fs.total_equity:,.0f}")
+        lines.append(" | ".join(parts))
+
+    missing_years = set(range(year_start, year_end + 1)) - {fs.fiscal_year for fs in existing}
+    if missing_years:
+        lines.append(f"\n  Missing years entirely: {sorted(missing_years)}")
+
+    lines.append("\nPlease provide COMPLETE data for ALL years, including the ones we already have (we will validate). Focus especially on filling in FCF, CapEx, and operating cash flow which we are missing.")
+    return "\n".join(lines)
+
+
 def enrich_company_financials(
     db: Session,
     company: Company,
@@ -171,16 +225,18 @@ def enrich_company_financials(
     ticker = company.ticker_symbol
     name = company.name
 
-    years_str = f"{year_start}-{year_end}"
+    # Build context from existing data to give the LLM confidence
+    existing_context = _build_existing_data_context(db, company, year_start, year_end)
+
     prompt = USER_PROMPT_TEMPLATE.format(
         company_name=name,
         ticker=ticker,
-        years=years_str,
+        existing_data_context=existing_context,
         year_start=year_start,
         year_end=year_end,
     )
 
-    logger.info(f"Requesting AI financials for {ticker} ({years_str})...")
+    logger.info(f"Requesting AI financials for {ticker} ({year_start}-{year_end})...")
 
     try:
         response_text = _call_llm(prompt, SYSTEM_PROMPT)
@@ -232,7 +288,17 @@ def enrich_company_financials(
                 existing.notes = (existing.notes or "") + " [AI enriched]"
                 updated += 1
         else:
-            # Create new record from AI data
+            # Create new record from AI data — but only if it has actual values
+            value_fields = [
+                "revenue", "net_income", "earnings_per_share", "total_assets",
+                "total_liabilities", "total_equity", "operating_cash_flow",
+                "capital_expenditures", "free_cash_flow",
+            ]
+            has_data = any(record.get(f) is not None for f in value_fields)
+            if not has_data:
+                logger.debug(f"Skipping FY{fiscal_year} - AI returned all nulls")
+                continue
+
             fs = FinancialStatement(
                 company_id=company.id,
                 fiscal_year=fiscal_year,
