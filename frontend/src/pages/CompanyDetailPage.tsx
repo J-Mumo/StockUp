@@ -66,7 +66,9 @@ export default function CompanyDetailPage() {
   if (loading) return <PageLoader />;
   if (!company) return <p className="text-red-400">Company not found</p>;
 
-  const chartData = prices.slice(-90).map((p) => ({
+  // Backend returns prices newest-first; sort ascending for chart display
+  const sortedPrices = [...prices].sort((a, b) => a.price_date.localeCompare(b.price_date));
+  const chartData = sortedPrices.slice(-90).map((p) => ({
     date: p.price_date,
     price: p.close_price,
     volume: p.volume,
@@ -134,71 +136,89 @@ export default function CompanyDetailPage() {
       </div>
 
       {/* Valuation Trend Chart */}
-      {trendData.length > 0 && (
-        <div className="bg-dark-surface border border-dark-border rounded-xl p-6 mb-6">
-          <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-            <BarChart3 size={18} className="text-emerald-400" />
-            Valuation vs Market Price
-          </h2>
-          <ResponsiveContainer width="100%" height={320}>
-            <ComposedChart data={trendData}>
-              <defs>
-                <linearGradient id="buyZoneGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.15} />
-                  <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-              <XAxis
-                dataKey="date"
-                stroke="#64748b"
-                fontSize={11}
-                tickFormatter={(d: string) => d.slice(5)}
-              />
-              <YAxis stroke="#64748b" fontSize={11} domain={['auto', 'auto']} />
-              <Tooltip
-                contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
-                labelStyle={{ color: '#94a3b8' }}
-                formatter={(value: number, name: string) => {
-                  const label = name === 'market_price' ? 'Market Price' : name === 'intrinsic_value' ? 'Intrinsic Value' : name;
-                  return [value != null ? `KES ${value.toFixed(2)}` : '—', label];
-                }}
-              />
-              <Area
-                type="monotone"
-                dataKey="intrinsic_value"
-                stroke="#10b981"
-                strokeWidth={2}
-                strokeDasharray="6 3"
-                fill="url(#buyZoneGradient)"
-                name="intrinsic_value"
-                dot={false}
-                connectNulls
-              />
-              <Line
-                type="monotone"
-                dataKey="market_price"
-                stroke="#f59e0b"
-                strokeWidth={2}
-                dot={false}
-                name="market_price"
-                connectNulls
-              />
-            </ComposedChart>
-          </ResponsiveContainer>
-          <div className="flex items-center gap-6 mt-3 text-xs text-gray-400">
-            <span className="flex items-center gap-1.5">
-              <span className="w-4 h-0.5 bg-amber-500 inline-block" /> Market Price
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-4 h-0.5 bg-emerald-500 inline-block border-dashed" style={{ borderTopWidth: 2, borderColor: '#10b981', background: 'none' }} /> Intrinsic Value
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-4 h-3 bg-emerald-500/20 inline-block rounded-sm" /> Buy Zone (Price &lt; IV)
-            </span>
+      {trendData.length > 0 && (() => {
+        // Compute sensible Y-axis domain: cap IV at 3x max market price to avoid extreme outliers
+        const marketPrices = trendData.map(d => d.market_price).filter((v): v is number => v != null);
+        const ivValues = trendData.map(d => d.intrinsic_value).filter((v): v is number => v != null);
+        const maxMarket = Math.max(...marketPrices, 1);
+        const minMarket = Math.min(...marketPrices, 0);
+        const ivCap = maxMarket * 3; // Cap IV display at 3x market price
+        const cappedIv = ivValues.filter(v => v <= ivCap);
+        const maxY = Math.max(maxMarket, ...cappedIv) * 1.1;
+        const minY = Math.max(0, minMarket * 0.9);
+
+        // Clamp trend data for chart (don't mutate original)
+        const chartTrendData = trendData.map(d => ({
+          ...d,
+          intrinsic_value: d.intrinsic_value != null && d.intrinsic_value > ivCap ? ivCap : d.intrinsic_value,
+        }));
+
+        return (
+          <div className="bg-dark-surface border border-dark-border rounded-xl p-6 mb-6">
+            <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+              <BarChart3 size={18} className="text-emerald-400" />
+              Valuation vs Market Price
+            </h2>
+            <ResponsiveContainer width="100%" height={320}>
+              <ComposedChart data={chartTrendData}>
+                <defs>
+                  <linearGradient id="buyZoneGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                <XAxis
+                  dataKey="date"
+                  stroke="#64748b"
+                  fontSize={11}
+                  tickFormatter={(d: string) => d.slice(5)}
+                />
+                <YAxis stroke="#64748b" fontSize={11} domain={[minY, maxY]} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
+                  labelStyle={{ color: '#94a3b8' }}
+                  formatter={(value: number, name: string) => {
+                    const label = name === 'market_price' ? 'Market Price' : name === 'intrinsic_value' ? 'Intrinsic Value' : name;
+                    return [value != null ? `KES ${value.toFixed(2)}` : '—', label];
+                  }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="intrinsic_value"
+                  stroke="#10b981"
+                  strokeWidth={2}
+                  strokeDasharray="6 3"
+                  fill="url(#buyZoneGradient)"
+                  name="intrinsic_value"
+                  dot={false}
+                  connectNulls
+                />
+                <Line
+                  type="monotone"
+                  dataKey="market_price"
+                  stroke="#f59e0b"
+                  strokeWidth={2}
+                  dot={false}
+                  name="market_price"
+                  connectNulls
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+            <div className="flex items-center gap-6 mt-3 text-xs text-gray-400">
+              <span className="flex items-center gap-1.5">
+                <span className="w-4 h-0.5 bg-amber-500 inline-block" /> Market Price
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-4 h-0.5 bg-emerald-500 inline-block border-dashed" style={{ borderTopWidth: 2, borderColor: '#10b981', background: 'none' }} /> Intrinsic Value
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-4 h-3 bg-emerald-500/20 inline-block rounded-sm" /> Buy Zone (Price &lt; IV)
+              </span>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Valuation Section */}
       <div className="bg-dark-surface border border-dark-border rounded-xl p-6 mb-6">
