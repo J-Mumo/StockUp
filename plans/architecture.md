@@ -18,7 +18,7 @@ StockUp is a web application that tracks Kenyan stock market prices and provides
 | **Database** | PostgreSQL 16 - native local install |
 | **Cache / Broker** | Redis - native local install |
 | **Task Queue** | Celery with Redis broker, Celery Beat scheduler |
-| **Data Sources** | yfinance - primary, BeautifulSoup4 scraper - fallback |
+| **Data Sources** | NSE scraper (afx.kwayisi.org) - primary, CSV archive import, yfinance - not working for NSE |
 | **Auth** | JWT via python-jose + passlib |
 | **Charts** | Recharts for React |
 | **API Docs** | FastAPI built-in OpenAPI / Swagger UI |
@@ -406,10 +406,11 @@ erDiagram
 ### Admin / CLI Commands
 | Command | Description |
 |---------|-------------|
-| `backfill-prices` | Fetch historical prices for all companies |
-| `update-prices-daily` | Fetch today's prices |
+| `seed-nse` | Seed NSE market and company universe |
+| `backfill-prices` | Fetch historical prices for all companies via scraper |
+| `update-daily` | Fetch today's prices |
+| `import-csv` | Import historical prices from CSV archive (2007–2025) |
 | `recalculate-valuations` | Recompute all intrinsic values |
-| `seed-nse-companies` | Seed NSE market and company universe |
 
 ---
 
@@ -671,31 +672,35 @@ ALERT_EVAL_MINUTE=30
 
 ## Milestones and Delivery Order
 
-### Milestone A: Foundation + Auth + Database
-1. Create project structure for `backend/`, `frontend/`, `scripts/`, `plans/`
-2. Initialize Python project with FastAPI, SQLAlchemy, Alembic, Celery, Redis client, pytest
-3. Add `.env`-based configuration
-4. Add `requirements.txt` and `Makefile` for common commands
-5. Install and configure PostgreSQL locally - create database and user
-6. Install and configure Redis locally
-7. Build FastAPI app entrypoint with modular routers
-8. Implement SQLAlchemy models for all entities
-9. Create Alembic migrations
-10. Implement JWT auth: register, login, me, refresh
-11. Add API error handling and logging middleware
-12. Verify connectivity: health endpoint + DB ping + Redis ping
-13. Write tests for auth flow
+### Milestone A: Foundation + Auth + Database ✅ COMPLETE
+1. ✅ Create project structure for `backend/`, `frontend/`, `scripts/`, `plans/`
+2. ✅ Initialize Python project with FastAPI, SQLAlchemy, Alembic, Celery, Redis client, pytest
+3. ✅ Add `.env`-based configuration
+4. ✅ Add `requirements.txt` and `Makefile` for common commands
+5. ✅ Install and configure PostgreSQL locally - create database and user
+6. ✅ Install and configure Redis locally
+7. ✅ Build FastAPI app entrypoint with modular routers
+8. ✅ Implement SQLAlchemy models for all entities
+9. ✅ Create Alembic migrations
+10. ✅ Implement JWT auth: register, login, me, refresh
+11. ✅ Add API error handling and logging middleware
+12. ✅ Verify connectivity: health endpoint + DB ping + Redis ping
+13. ✅ Write tests for auth flow
 
-### Milestone B: Price Ingestion + Company Data
-14. Seed NSE market and company universe with yfinance ticker mappings
-15. Build yfinance adapter for NSE tickers
-16. Build fallback NSE scraper adapter
-17. Build `price_fetcher.py` orchestrator with fallback logic
-18. Implement idempotent upsert logic for prices
-19. Add CLI commands: `backfill-prices`, `update-prices-daily`, `seed-nse-companies`
-20. Build stocks API endpoints: markets, companies, prices
-21. Backfill historical prices for all NSE companies
-22. Write tests for price fetcher and stock endpoints
+### Milestone B: Price Ingestion + Company Data ✅ COMPLETE
+14. ✅ Seed NSE market and company universe with yfinance ticker mappings
+15. ✅ Build yfinance adapter for NSE tickers
+16. ✅ Build fallback NSE scraper adapter (regex-based — BeautifulSoup fails on afx.kwayisi.org HTML)
+17. ✅ Build `price_fetcher.py` orchestrator with fallback logic
+18. ✅ Implement idempotent upsert logic for prices (PostgreSQL ON CONFLICT DO UPDATE)
+19. ✅ Add CLI commands: `backfill-prices`, `update-prices-daily`, `seed-nse-companies`, `import-csv`
+20. ✅ Build stocks API endpoints: markets, companies, prices, financials, valuations (12 endpoints)
+21. ✅ Backfill historical prices for all NSE companies
+    - 254,709 price records loaded (2007-01-02 → 2026-05-05)
+    - Sources: CSV archive (2007–Oct 2025) + scraper (Apr 21–May 5, 2026)
+    - Known gap: Nov 2025 → Apr 20, 2026 (source data unavailable)
+    - yfinance does NOT support NSE Kenya tickers (.NR/.KE both fail)
+22. ✅ Write tests for price fetcher and stock endpoints (42 tests passing)
 
 ### Milestone C: Financials + Valuation + Alerts
 23. Build financial statement model and manual entry API
@@ -712,33 +717,33 @@ ALERT_EVAL_MINUTE=30
 34. Write tests for recommendation logic
 35. Write tests for alert triggering
 
-### Milestone D: Portfolio + Celery Jobs
-36. Build portfolio model and API: create, list, detail
-37. Build transaction-based holdings: buy/sell events
-38. Implement current holdings with cost basis calculation
-39. Implement performance metrics: unrealized/realized P and L, CAGR, allocation
-40. Build watchlist model and API
-41. Configure Celery with Redis broker
-42. Create scheduled tasks: daily price fetch, valuation calc, alert eval
-43. Configure Celery Beat scheduler for daily runs
-44. Add retry policy and task run logging
-45. Build dashboard summary endpoint
-46. Write integration tests for portfolio calculations
-47. Create end-to-end smoke test script
+### Milestone D: Portfolio + Celery Jobs ✅ COMPLETE
+36. ✅ Build portfolio model and API: create, list, detail
+37. ✅ Build transaction-based holdings: buy/sell events
+38. ✅ Implement current holdings with cost basis calculation
+39. ✅ Implement performance metrics: unrealized/realized P and L, CAGR, allocation
+40. ✅ Build watchlist model and API
+41. ✅ Configure Celery with Redis broker
+42. ✅ Create scheduled tasks: daily price fetch, valuation calc, alert eval
+43. ✅ Configure Celery Beat scheduler for daily runs
+44. ✅ Add retry policy and task run logging
+45. ✅ Build dashboard summary endpoint
+46. ✅ Write integration tests for portfolio calculations (20 tests)
+47. ✅ Create end-to-end smoke test script
 
-### Milestone E: Frontend Dashboard
-48. Scaffold React + TypeScript + Vite + TailwindCSS app
-49. Set up API client with JWT interceptor
-50. Build auth flow: Login, Register pages
-51. Build Dashboard page: portfolio summary, recommendations, alerts
-52. Build Companies page: list with search and filters
-53. Build Company Detail page: price chart, financials, valuation, analysis
-54. Build Financial Entry page: forms for income, balance sheet, cash flow
-55. Build Portfolio page: holdings, transactions, performance charts
-56. Build Alerts page: active alerts, alert configuration
-57. Build Watchlist page
-58. Add error handling and loading states throughout
-59. Polish UI, responsive design, final testing
+### Milestone E: Frontend Dashboard ✅ COMPLETE
+48. ✅ Scaffold React + TypeScript + Vite + TailwindCSS app
+49. ✅ Set up API client with JWT interceptor
+50. ✅ Build auth flow: Login, Register pages
+51. ✅ Build Dashboard page: portfolio summary, recommendations, alerts
+52. ✅ Build Companies page: list with search and filters
+53. ✅ Build Company Detail page: price chart, financials, valuation, analysis
+54. ✅ Build Financial Entry page: forms for income, balance sheet, cash flow
+55. ✅ Build Portfolio page: holdings, transactions, performance charts
+56. ✅ Build Alerts page: active alerts, alert configuration
+57. ✅ Build Watchlist page
+58. ✅ Add error handling and loading states throughout
+59. ✅ Polish UI, responsive design, final testing
 
 ---
 

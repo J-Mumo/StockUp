@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     yfinance_enabled: bool = True
     scraper_enabled: bool = True
     scraper_base_url: str = "https://afx.kwayisi.org/ngse/"
+    kenyanstocks_enabled: bool = True
 
     # Scheduled Jobs
     price_fetch_hour: int = 18

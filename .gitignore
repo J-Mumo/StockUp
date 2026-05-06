@@ -51,3 +51,5 @@ htmlcov/
 
 # Alembic
 backend/alembic/versions/__pycache__/
+"backend/'2026-01-01'"  
+backend/explore_nse.py 
