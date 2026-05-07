@@ -25,8 +25,15 @@
   body {
     @apply bg-dark-bg text-gray-100;
   }
-  input[type="date"]::-webkit-calendar-picker-indicator {
-    filter: invert(1);
-    cursor: pointer;
-  }
+}
+
+/* Dark-mode calendar picker icon fix */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.8) brightness(1.5);
+  cursor: pointer;
+  opacity: 1;
+}
+
+input[type="date"] {
+  position: relative;
 }
