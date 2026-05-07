@@ -77,7 +77,7 @@ export const portfolioApi = {
   createTransaction: (id: number, data: {
     company_id: number;
     transaction_type: 'buy' | 'sell';
-    shares: number;
+    quantity: number;
     price_per_share: number;
     transaction_date: string;
     notes?: string;

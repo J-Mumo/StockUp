@@ -111,13 +111,16 @@ export interface Transaction {
   id: number;
   portfolio_id: number;
   company_id: number;
+  company_name: string | null;
+  company_ticker: string | null;
   transaction_type: 'buy' | 'sell';
-  shares: number;
+  quantity: number;
   price_per_share: number;
   total_amount: number;
+  fees: number | null;
   transaction_date: string;
   notes: string | null;
-  company?: Company;
+  created_at: string;
 }
 
 export interface Holding {

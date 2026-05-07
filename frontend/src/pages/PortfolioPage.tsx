@@ -91,10 +91,12 @@ export default function PortfolioPage() {
     if (!selectedPortfolio) return;
     try {
       await portfolioApi.createTransaction(selectedPortfolio.id, {
-        ...data,
         company_id: Number(data.company_id),
-        shares: Number(data.shares),
+        transaction_type: data.transaction_type,
+        quantity: Number(data.shares),
         price_per_share: Number(data.price_per_share),
+        transaction_date: data.transaction_date,
+        notes: data.notes || undefined,
       });
       toast.success('Transaction recorded');
       setShowAddTransaction(false);
@@ -312,8 +314,8 @@ export default function PortfolioPage() {
                             {t.transaction_type.toUpperCase()}
                           </span>
                         </td>
-                        <td className="py-3 text-white">{t.company?.name || `Company #${t.company_id}`}</td>
-                        <td className="py-3 text-right text-gray-300">{t.shares}</td>
+                        <td className="py-3 text-white">{t.company_name || t.company_ticker || `Company #${t.company_id}`}</td>
+                        <td className="py-3 text-right text-gray-300">{t.quantity}</td>
                         <td className="py-3 text-right text-gray-300">{t.price_per_share.toFixed(2)}</td>
                         <td className="py-3 text-right text-gray-300">{formatCurrency(t.total_amount)}</td>
                       </tr>
