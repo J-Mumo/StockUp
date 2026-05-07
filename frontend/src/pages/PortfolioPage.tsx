@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form';
 import { Plus, Briefcase, TrendingUp, TrendingDown, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { portfolioApi, stocksApi } from '../lib/services';
-import type { Portfolio, Holding, Transaction, PortfolioPerformance, Company } from '../types';
+import type { Portfolio, Holding, HoldingsListResponse, Transaction, PortfolioPerformance, Company } from '../types';
 import { SkeletonCard, PageLoader } from '../components/ui/LoadingSpinner';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -60,7 +60,7 @@ export default function PortfolioPage() {
         portfolioApi.getTransactions(portfolio.id),
         portfolioApi.getPerformance(portfolio.id),
       ]);
-      setHoldings(holdingsRes.data);
+      setHoldings(holdingsRes.data.holdings);
       setTransactions(transRes.data);
       setPerformance(perfRes.data);
     } catch {
@@ -193,18 +193,18 @@ export default function PortfolioPage() {
               </div>
               <div className="bg-dark-surface border border-dark-border rounded-xl p-4">
                 <p className="text-sm text-gray-400">Current Value</p>
-                <p className="text-xl font-bold text-white">{formatCurrency(performance.current_value)}</p>
+                <p className="text-xl font-bold text-white">{formatCurrency(performance.total_current_value ?? 0)}</p>
               </div>
               <div className="bg-dark-surface border border-dark-border rounded-xl p-4">
                 <p className="text-sm text-gray-400">Total Gain</p>
-                <p className={`text-xl font-bold ${performance.total_gain >= 0 ? 'text-gain' : 'text-loss'}`}>
-                  {formatCurrency(performance.total_gain)}
+                <p className={`text-xl font-bold ${(performance.total_pnl ?? 0) >= 0 ? 'text-gain' : 'text-loss'}`}>
+                  {formatCurrency(performance.total_pnl ?? 0)}
                 </p>
               </div>
               <div className="bg-dark-surface border border-dark-border rounded-xl p-4">
                 <p className="text-sm text-gray-400">Return %</p>
-                <p className={`text-xl font-bold ${performance.total_gain_pct >= 0 ? 'text-gain' : 'text-loss'}`}>
-                  {performance.total_gain_pct >= 0 ? '+' : ''}{performance.total_gain_pct.toFixed(2)}%
+                <p className={`text-xl font-bold ${(performance.total_return_pct ?? 0) >= 0 ? 'text-gain' : 'text-loss'}`}>
+                  {(performance.total_return_pct ?? 0) >= 0 ? '+' : ''}{(performance.total_return_pct ?? 0).toFixed(2)}%
                 </p>
               </div>
             </div>
@@ -242,15 +242,15 @@ export default function PortfolioPage() {
                         <tr key={h.company_id} className="border-b border-dark-border/50">
                           <td className="py-3">
                             <p className="text-white font-medium">{h.company_name}</p>
-                            <p className="text-xs text-gray-500">{h.symbol}</p>
+                            <p className="text-xs text-gray-500">{h.company_ticker}</p>
                           </td>
                           <td className="py-3 text-right text-gray-300">{h.total_shares}</td>
-                          <td className="py-3 text-right text-gray-300">{h.average_cost.toFixed(2)}</td>
+                          <td className="py-3 text-right text-gray-300">{h.average_cost_basis.toFixed(2)}</td>
                           <td className="py-3 text-right text-gray-300">{h.current_price?.toFixed(2) ?? '—'}</td>
                           <td className="py-3 text-right">
-                            {h.unrealized_gain_pct !== null ? (
-                              <span className={h.unrealized_gain_pct >= 0 ? 'text-gain' : 'text-loss'}>
-                                {h.unrealized_gain_pct >= 0 ? '+' : ''}{h.unrealized_gain_pct.toFixed(2)}%
+                            {h.unrealized_pnl_pct !== null ? (
+                              <span className={(h.unrealized_pnl_pct ?? 0) >= 0 ? 'text-gain' : 'text-loss'}>
+                                {(h.unrealized_pnl_pct ?? 0) >= 0 ? '+' : ''}{h.unrealized_pnl_pct?.toFixed(2)}%
                               </span>
                             ) : '—'}
                           </td>
@@ -263,7 +263,7 @@ export default function PortfolioPage() {
                 {/* Holdings Chart */}
                 <div className="mt-6">
                   <ResponsiveContainer width="100%" height={200}>
-                    <BarChart data={holdings.map((h) => ({ name: h.symbol, value: h.current_value || h.total_cost }))}>
+                    <BarChart data={holdings.map((h) => ({ name: h.company_ticker, value: h.current_value || h.total_cost }))}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                       <XAxis dataKey="name" stroke="#64748b" fontSize={12} />
                       <YAxis stroke="#64748b" fontSize={12} />

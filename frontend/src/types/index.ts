@@ -123,23 +123,39 @@ export interface Transaction {
 export interface Holding {
   company_id: number;
   company_name: string;
-  symbol: string;
+  company_ticker: string;
   total_shares: number;
-  average_cost: number;
+  average_cost_basis: number;
   total_cost: number;
   current_price: number | null;
   current_value: number | null;
-  unrealized_gain: number | null;
-  unrealized_gain_pct: number | null;
+  unrealized_pnl: number | null;
+  unrealized_pnl_pct: number | null;
+}
+
+export interface HoldingsListResponse {
+  portfolio_id: number;
+  portfolio_name: string;
+  holdings: Holding[];
+  total_invested: number;
+  total_current_value: number | null;
+  total_unrealized_pnl: number | null;
 }
 
 export interface PortfolioPerformance {
   portfolio_id: number;
+  portfolio_name: string;
+  initial_capital: number | null;
   total_invested: number;
-  current_value: number;
-  total_gain: number;
-  total_gain_pct: number;
-  holdings_count: number;
+  total_current_value: number | null;
+  cash_from_sales: number;
+  total_fees_paid: number;
+  unrealized_pnl: number | null;
+  realized_pnl: number;
+  total_pnl: number | null;
+  total_return_pct: number | null;
+  cagr: number | null;
+  allocations: { company_id: number; company_name: string; company_ticker: string; current_value: number; allocation_pct: number }[];
 }
 
 export interface Alert {
