@@ -28,9 +28,12 @@ export default function PortfolioPage() {
   const [showAddTransaction, setShowAddTransaction] = useState(false);
   const [newPortfolioName, setNewPortfolioName] = useState('');
 
-  const { register, handleSubmit, reset } = useForm<TransactionForm>({
+  const { register, handleSubmit, reset, setValue } = useForm<TransactionForm>({
     defaultValues: { transaction_type: 'buy', transaction_date: new Date().toISOString().split('T')[0] },
   });
+  const [companySearch, setCompanySearch] = useState('');
+  const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false);
+  const [selectedCompanyLabel, setSelectedCompanyLabel] = useState('');
 
   useEffect(() => {
     loadPortfolios();
@@ -96,6 +99,8 @@ export default function PortfolioPage() {
       toast.success('Transaction recorded');
       setShowAddTransaction(false);
       reset();
+      setSelectedCompanyLabel('');
+      setCompanySearch('');
       selectPortfolio(selectedPortfolio);
     } catch {
       toast.error('Failed to record transaction');
@@ -340,17 +345,56 @@ export default function PortfolioPage() {
                   </button>
                 </div>
                 <form onSubmit={handleSubmit(onAddTransaction)} className="space-y-4">
-                  <div>
+                  <div className="relative">
                     <label className="block text-sm text-gray-300 mb-1">Company</label>
-                    <select
-                      {...register('company_id', { required: true })}
-                      className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    >
-                      <option value="">Select company</option>
-                      {companies.map((c) => (
-                        <option key={c.id} value={c.id}>{c.name} ({c.ticker_symbol})</option>
-                      ))}
-                    </select>
+                    <input type="hidden" {...register('company_id', { required: true })} />
+                    <input
+                      type="text"
+                      value={companyDropdownOpen ? companySearch : selectedCompanyLabel}
+                      onChange={(e) => {
+                        setCompanySearch(e.target.value);
+                        setCompanyDropdownOpen(true);
+                      }}
+                      onFocus={() => {
+                        setCompanyDropdownOpen(true);
+                        setCompanySearch('');
+                      }}
+                      placeholder="Type to search companies..."
+                      className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      autoComplete="off"
+                    />
+                    {companyDropdownOpen && (
+                      <div className="absolute z-50 w-full mt-1 max-h-48 overflow-y-auto bg-dark-bg border border-dark-border rounded-lg shadow-lg">
+                        {companies
+                          .filter((c) => {
+                            const q = companySearch.toLowerCase();
+                            return c.name.toLowerCase().includes(q) || c.ticker_symbol.toLowerCase().includes(q);
+                          })
+                          .slice(0, 20)
+                          .map((c) => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => {
+                                setValue('company_id', c.id);
+                                setSelectedCompanyLabel(`${c.name} (${c.ticker_symbol})`);
+                                setCompanySearch('');
+                                setCompanyDropdownOpen(false);
+                              }}
+                              className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-dark-border/50 hover:text-white transition-colors"
+                            >
+                              <span className="font-medium text-white">{c.ticker_symbol}</span>
+                              <span className="ml-2 text-gray-400">{c.name}</span>
+                            </button>
+                          ))}
+                        {companies.filter((c) => {
+                          const q = companySearch.toLowerCase();
+                          return c.name.toLowerCase().includes(q) || c.ticker_symbol.toLowerCase().includes(q);
+                        }).length === 0 && (
+                          <p className="px-4 py-2 text-sm text-gray-500">No companies found</p>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>

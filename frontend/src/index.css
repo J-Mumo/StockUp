@@ -19,7 +19,14 @@
 }
 
 @layer base {
+  html {
+    color-scheme: dark;
+  }
   body {
-    @apply bg-gray-50 text-gray-900 dark:bg-dark-bg dark:text-gray-100;
+    @apply bg-dark-bg text-gray-100;
+  }
+  input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+    cursor: pointer;
   }
 }
