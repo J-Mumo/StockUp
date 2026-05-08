@@ -792,6 +792,84 @@ export default function CompanyDetailPage() {
           </div>
         )}
       </div>
+
+      {/* YoY Growth Analysis */}
+      {financials.length >= 2 && (
+        <div className="bg-dark-surface border border-dark-border rounded-xl p-6 mt-6">
+          <h2 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
+            <TrendingUp size={18} className="text-cyan-400" />
+            Year-over-Year Growth Analysis
+          </h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-gray-400 border-b border-dark-border">
+                  <th className="pb-3 font-medium sticky left-0 bg-dark-surface">Year</th>
+                  <th className="pb-3 font-medium px-2">Revenue (B)</th>
+                  <th className="pb-3 font-medium px-2">Rev YoY</th>
+                  <th className="pb-3 font-medium px-2">Net Inc (B)</th>
+                  <th className="pb-3 font-medium px-2">NI YoY</th>
+                  <th className="pb-3 font-medium px-2">EPS</th>
+                  <th className="pb-3 font-medium px-2">EPS YoY</th>
+                  <th className="pb-3 font-medium px-2">Assets (B)</th>
+                  <th className="pb-3 font-medium px-2">Assets YoY</th>
+                  <th className="pb-3 font-medium px-2">Equity (B)</th>
+                  <th className="pb-3 font-medium px-2">Equity YoY</th>
+                  <th className="pb-3 font-medium px-2">Liabilities (B)</th>
+                  <th className="pb-3 font-medium px-2">Liab YoY</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(() => {
+                  const sorted = [...financials].sort((a, b) => a.fiscal_year - b.fiscal_year);
+                  const yoyPct = (curr: number | null, prev: number | null) => {
+                    if (curr == null || prev == null || prev === 0) return null;
+                    return ((curr - prev) / Math.abs(prev)) * 100;
+                  };
+                  const fmtB = (v: number | null) => v != null ? (v / 1e9).toFixed(2) : '—';
+                  const fmtYoY = (v: number | null) => {
+                    if (v == null) return <span className="text-gray-600">—</span>;
+                    const color = v > 0 ? 'text-gain' : v < 0 ? 'text-loss' : 'text-gray-400';
+                    return <span className={color}>{v > 0 ? '+' : ''}{v.toFixed(1)}%</span>;
+                  };
+                  return sorted.map((fs, idx) => {
+                    const prev = idx > 0 ? sorted[idx - 1] : null;
+                    const liabilities = fs.total_assets != null && fs.total_equity != null
+                      ? fs.total_assets - fs.total_equity : null;
+                    const prevLiabilities = prev && prev.total_assets != null && prev.total_equity != null
+                      ? prev.total_assets - prev.total_equity : null;
+                    return (
+                      <tr key={fs.id} className="border-b border-dark-border/50 hover:bg-dark-border/10">
+                        <td className="py-2.5 sticky left-0 bg-dark-surface">
+                          <span className="px-2 py-0.5 bg-dark-border/50 rounded text-xs text-gray-300">
+                            {fs.fiscal_year}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-2 text-gray-300">{fmtB(fs.revenue)}</td>
+                        <td className="py-2.5 px-2">{fmtYoY(yoyPct(fs.revenue, prev?.revenue ?? null))}</td>
+                        <td className="py-2.5 px-2 text-gray-300">{fmtB(fs.net_income)}</td>
+                        <td className="py-2.5 px-2">{fmtYoY(yoyPct(fs.net_income, prev?.net_income ?? null))}</td>
+                        <td className="py-2.5 px-2 text-gray-300">
+                          {fs.earnings_per_share != null ? fs.earnings_per_share.toFixed(2) : '—'}
+                        </td>
+                        <td className="py-2.5 px-2">
+                          {fmtYoY(yoyPct(fs.earnings_per_share, prev?.earnings_per_share ?? null))}
+                        </td>
+                        <td className="py-2.5 px-2 text-gray-300">{fmtB(fs.total_assets)}</td>
+                        <td className="py-2.5 px-2">{fmtYoY(yoyPct(fs.total_assets, prev?.total_assets ?? null))}</td>
+                        <td className="py-2.5 px-2 text-gray-300">{fmtB(fs.total_equity)}</td>
+                        <td className="py-2.5 px-2">{fmtYoY(yoyPct(fs.total_equity, prev?.total_equity ?? null))}</td>
+                        <td className="py-2.5 px-2 text-gray-300">{fmtB(liabilities)}</td>
+                        <td className="py-2.5 px-2">{fmtYoY(yoyPct(liabilities, prevLiabilities))}</td>
+                      </tr>
+                    );
+                  });
+                })()}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
