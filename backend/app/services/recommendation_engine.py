@@ -49,6 +49,8 @@ class QualityScore:
     def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
+            "met": self.passed,
+            "description": self.detail,
             "passed": self.passed,
             "value": self.value,
             "threshold": self.threshold,

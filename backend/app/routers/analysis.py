@@ -145,7 +145,7 @@ def get_recommendation(
     latest_iv = (
         db.query(IntrinsicValue)
         .filter(IntrinsicValue.company_id == company_id)
-        .order_by(desc(IntrinsicValue.valuation_date))
+        .order_by(desc(IntrinsicValue.valuation_date), desc(IntrinsicValue.id))
         .first()
     )
 
