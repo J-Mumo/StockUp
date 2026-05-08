@@ -2,17 +2,21 @@
 
 Generates buy/sell/hold recommendations based on:
 - Margin of Safety (MOS)
-- Quality factors (ROE, D/E, earnings growth, FCF, dividends, current ratio)
+- Quality gate: 5 core factors must ALL pass for a Buy recommendation
+- 10 total quality factors scored from financial_statements table
 
-All factors are purely quantitative — computed from the financial_statements table.
-No subjective moat assessment; sustained ROE > 15% is the moat proxy.
+Core quality gate (all 5 must pass for Buy):
+    1. FCF increasing for 3+ consecutive years
+    2. Consistently increasing earnings (positive trend, majority of years)
+    3. Conservative debt (total liabilities < 4x net income)
+    4. ROE > 15% (sustained across years)
+    5. Capital efficiency (FCF/Revenue > 5%)
 
 Recommendation tiers:
-    Strong Buy:  MOS > 30% AND ROE > 15% AND D/E < 0.5
-    Buy:         MOS > 30% AND ROE > 15%
-    Buy:         MOS > 30%
-    Accumulate:  MOS 10-30% AND ROE > 15%
-    Hold:        MOS 0-10%
+    Strong Buy:  MOS > 30% AND all 5 core factors AND D/E < 0.5 AND dividends
+    Buy:         MOS > 30% AND all 5 core factors pass
+    Accumulate:  MOS 10-30% AND >= 4 of 5 core factors pass
+    Hold:        MOS > 0% OR quality gate not met (potential value trap)
     Hold/Trim:   MOS -10% to 0%
     Sell:        MOS < -10%
     Strong Sell: MOS < -20%
@@ -521,14 +525,20 @@ def generate_recommendation(
     margin_of_safety: float | None,
     financials: list[FinancialStatement],
 ) -> Recommendation:
-    """Generate a buy/sell/hold recommendation.
+    """Generate a buy/sell/hold recommendation with quality-gated buy logic.
+
+    Core quality gate (all 5 must pass for Buy):
+        1. FCF increasing for 3+ consecutive years
+        2. Consistently increasing sales & earnings
+        3. Conservative debt (liabilities < 4x net income)
+        4. ROE > 15%
+        5. Capital efficiency (FCF/Revenue > 5%)
 
     Decision matrix:
-        Strong Buy:  MOS > 30% AND ROE > 15% AND D/E < 0.5
-        Buy:         MOS > 30% AND ROE > 15%
-        Buy:         MOS > 30%
-        Accumulate:  MOS 10-30% AND ROE > 15%
-        Hold:        MOS 0-10%
+        Strong Buy:  MOS > 30% AND all 5 quality factors pass AND D/E < 0.5 AND dividends
+        Buy:         MOS > 30% AND all 5 quality factors pass
+        Accumulate:  MOS > 10% AND >= 4 of 5 quality factors pass
+        Hold:        MOS > 0% OR quality factors insufficient
         Hold/Trim:   MOS -10% to 0%
         Sell:        MOS < -10%
         Strong Sell: MOS < -20%
@@ -551,41 +561,72 @@ def generate_recommendation(
         )
 
     mos_pct = margin_of_safety * 100  # Convert to percentage for display
-    has_roe = quality.has_high_roe
+
+    # Core quality gate: 5 key factors for buy eligibility
+    core_factors = [
+        quality.has_fcf_increasing,       # FCF increasing 3+ years
+        quality.has_earnings_growth,       # Consistently increasing earnings
+        quality.has_conservative_debt,     # Liabilities < 4x NI
+        quality.has_high_roe,              # ROE > 15%
+        quality.has_capital_efficiency,    # FCF/Revenue > 5%
+    ]
+    core_passed = sum(1 for f in core_factors if f)
+    all_core_pass = core_passed == 5
+
+    # Supplementary quality factors
     has_low_de = quality.has_low_leverage
+    has_dividends = quality.has_dividend_consistency
+    has_revenue = quality.has_revenue_consistency
+
+    # Build failing factors description for reason text
+    failing = []
+    if not quality.has_high_roe:
+        failing.append("ROE < 15%")
+    if not quality.has_fcf_increasing:
+        failing.append("FCF not consistently increasing")
+    if not quality.has_earnings_growth:
+        failing.append("earnings not growing")
+    if not quality.has_conservative_debt:
+        failing.append("high debt/earnings ratio")
+    if not quality.has_capital_efficiency:
+        failing.append("low capital efficiency")
 
     # Decision logic (ordered from most bullish to most bearish)
     if margin_of_safety > 0.30:
-        if has_roe and has_low_de:
+        if all_core_pass and has_low_de and has_dividends:
             action = "Strong Buy"
             reason = (
-                f"Deep value: {mos_pct:.1f}% margin of safety with "
-                f"consistent high ROE and low leverage"
+                f"Deep value: {mos_pct:.1f}% margin of safety — all quality "
+                f"factors pass with low leverage and consistent dividends "
+                f"(score: {quality.score}/{quality.max_score})"
             )
-        elif has_roe:
+        elif all_core_pass:
             action = "Buy"
             reason = (
-                f"Undervalued: {mos_pct:.1f}% margin of safety with "
-                f"strong earnings quality (ROE > 15%)"
+                f"Undervalued: {mos_pct:.1f}% margin of safety — all 5 core "
+                f"quality factors pass (score: {quality.score}/{quality.max_score})"
             )
         else:
-            action = "Buy"
+            action = "Hold"
             reason = (
-                f"Undervalued: {mos_pct:.1f}% margin of safety "
-                f"(quality score: {quality.score}/{quality.max_score})"
+                f"Undervalued ({mos_pct:.1f}% MOS) but quality gate not met "
+                f"({core_passed}/5 core factors). Fails: {', '.join(failing)}. "
+                f"Potential value trap — hold until quality improves"
             )
     elif margin_of_safety > 0.10:
-        if has_roe:
+        if core_passed >= 4:
             action = "Accumulate"
             reason = (
                 f"Moderately undervalued: {mos_pct:.1f}% margin of safety "
-                f"with strong ROE — suitable for accumulation"
+                f"with {core_passed}/5 core quality factors — suitable for "
+                f"gradual accumulation"
             )
         else:
             action = "Hold"
             reason = (
                 f"Marginally undervalued: {mos_pct:.1f}% margin of safety "
-                f"but quality factors insufficient for accumulation"
+                f"but quality insufficient ({core_passed}/5 core factors). "
+                f"Fails: {', '.join(failing)}"
             )
     elif margin_of_safety >= 0:
         action = "Hold"
