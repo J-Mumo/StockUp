@@ -487,7 +487,7 @@ def list_valuations(
     valuations = (
         db.query(IntrinsicValue)
         .filter(IntrinsicValue.company_id == company_id)
-        .order_by(desc(IntrinsicValue.valuation_date))
+        .order_by(desc(IntrinsicValue.valuation_date), desc(IntrinsicValue.id))
         .all()
     )
     return [_valuation_to_schema(v) for v in valuations]
@@ -507,7 +507,7 @@ def get_latest_valuation(
     latest = (
         db.query(IntrinsicValue)
         .filter(IntrinsicValue.company_id == company_id)
-        .order_by(desc(IntrinsicValue.valuation_date))
+        .order_by(desc(IntrinsicValue.valuation_date), desc(IntrinsicValue.id))
         .first()
     )
     if latest is None:
