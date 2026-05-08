@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { Plus, Briefcase, TrendingUp, TrendingDown, X, Pencil, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -299,8 +300,10 @@ export default function PortfolioPage() {
                       {holdings.map((h) => (
                         <tr key={h.company_id} className="border-b border-dark-border/50">
                           <td className="py-3">
-                            <p className="text-white font-medium">{h.company_name}</p>
-                            <p className="text-xs text-gray-500">{h.company_ticker}</p>
+                            <Link to={`/companies/${h.company_id}`} className="hover:text-primary-400 transition-colors">
+                              <p className="text-white font-medium">{h.company_name}</p>
+                              <p className="text-xs text-gray-500">{h.company_ticker}</p>
+                            </Link>
                           </td>
                           <td className="py-3 text-right text-gray-300">{h.total_shares}</td>
                           <td className="py-3 text-right text-gray-300">{h.average_cost_basis.toFixed(2)}</td>
@@ -366,7 +369,11 @@ export default function PortfolioPage() {
                             {t.transaction_type.toUpperCase()}
                           </span>
                         </td>
-                        <td className="py-3 text-white">{t.company_name || t.company_ticker || `Company #${t.company_id}`}</td>
+                        <td className="py-3">
+                          <Link to={`/companies/${t.company_id}`} className="text-white hover:text-primary-400 transition-colors">
+                            {t.company_name || t.company_ticker || `Company #${t.company_id}`}
+                          </Link>
+                        </td>
                         <td className="py-3 text-right text-gray-300">{t.quantity}</td>
                         <td className="py-3 text-right text-gray-300">{t.price_per_share.toFixed(2)}</td>
                         <td className="py-3 text-right text-gray-300">{formatCurrency(t.total_amount)}</td>

@@ -3,10 +3,10 @@ import { useParams, Link } from 'react-router-dom';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, ReferenceLine, ComposedChart, BarChart, Bar,
 } from 'recharts';
-import { ArrowLeft, TrendingUp, Calculator, FileText, RefreshCw, BarChart3, ExternalLink, Edit3, Info, RotateCcw } from 'lucide-react';
+import { ArrowLeft, TrendingUp, Calculator, FileText, RefreshCw, BarChart3, ExternalLink, Edit3, Info, RotateCcw, Briefcase } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { stocksApi, analysisApi } from '../lib/services';
-import type { CompanyDetail, PriceHistory, FinancialStatement, IntrinsicValue, Recommendation, ValuationTrendPoint } from '../types';
+import { stocksApi, analysisApi, portfolioApi } from '../lib/services';
+import type { CompanyDetail, PriceHistory, FinancialStatement, IntrinsicValue, Recommendation, ValuationTrendPoint, Holding, Portfolio } from '../types';
 import { PageLoader } from '../components/ui/LoadingSpinner';
 
 type TimePeriod = '1M' | '3M' | '6M' | '1Y' | 'ALL';
@@ -73,6 +73,7 @@ export default function CompanyDetailPage() {
   const [customEpvWeight, setCustomEpvWeight] = useState<string>('');
   const [customBvWeight, setCustomBvWeight] = useState<string>('');
   const [isCustom, setIsCustom] = useState(false);
+  const [position, setPosition] = useState<Holding | null>(null);
 
   useEffect(() => {
     if (!companyId) return;
@@ -95,6 +96,27 @@ export default function CompanyDetailPage() {
       })
       .catch(() => toast.error('Failed to load company data'))
       .finally(() => setLoading(false));
+  }, [companyId]);
+
+  // Fetch user's position in this company across all portfolios
+  useEffect(() => {
+    if (!companyId) return;
+    portfolioApi.list()
+      .then(async (res) => {
+        const portfolios: Portfolio[] = res.data;
+        for (const p of portfolios) {
+          try {
+            const holdingsRes = await portfolioApi.getHoldings(p.id);
+            const match = holdingsRes.data.holdings.find((h: Holding) => h.company_id === companyId);
+            if (match && match.total_shares > 0) {
+              setPosition(match);
+              return;
+            }
+          } catch { /* ignore */ }
+        }
+        setPosition(null);
+      })
+      .catch(() => setPosition(null));
   }, [companyId]);
 
   const handleCompute = async (useCustom = false) => {
@@ -408,6 +430,52 @@ export default function CompanyDetailPage() {
           </div>
         );
       })()}
+
+      {/* Your Position */}
+      {position && (
+        <div className="bg-gradient-to-r from-blue-900/30 to-purple-900/30 border border-blue-500/30 rounded-xl p-5 mb-6">
+          <h2 className="text-sm font-semibold text-blue-300 flex items-center gap-2 mb-3">
+            <Briefcase size={16} />
+            Your Position
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div>
+              <p className="text-xs text-gray-400">Shares Held</p>
+              <p className="text-lg font-bold text-white">{position.total_shares.toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Avg Cost</p>
+              <p className="text-lg font-bold text-white">KES {position.average_cost_basis.toFixed(2)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Total Cost</p>
+              <p className="text-lg font-bold text-white">KES {position.total_cost.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Current Value</p>
+              <p className="text-lg font-bold text-white">
+                {position.current_value != null ? `KES ${position.current_value.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '—'}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Unrealized P&L</p>
+              <p className={`text-lg font-bold ${(position.unrealized_pnl ?? 0) >= 0 ? 'text-gain' : 'text-loss'}`}>
+                {position.unrealized_pnl != null
+                  ? `${position.unrealized_pnl >= 0 ? '+' : ''}KES ${position.unrealized_pnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                  : '—'}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">P&L %</p>
+              <p className={`text-lg font-bold ${(position.unrealized_pnl_pct ?? 0) >= 0 ? 'text-gain' : 'text-loss'}`}>
+                {position.unrealized_pnl_pct != null
+                  ? `${position.unrealized_pnl_pct >= 0 ? '+' : ''}${position.unrealized_pnl_pct.toFixed(2)}%`
+                  : '—'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Valuation Section */}
       <div className="bg-dark-surface border border-dark-border rounded-xl p-6 mb-6">
