@@ -62,8 +62,8 @@ class QualityScore:
 class QualityAssessment:
     """Complete quality assessment for a company."""
     factors: list[QualityScore] = field(default_factory=list)
-    score: int = 0  # number of factors passed (0-6)
-    max_score: int = 6
+    score: int = 0  # number of factors passed (0-10)
+    max_score: int = 10
 
     # Derived flags
     has_high_roe: bool = False
@@ -72,6 +72,10 @@ class QualityAssessment:
     has_positive_fcf: bool = False
     has_dividend_consistency: bool = False
     has_adequate_liquidity: bool = False
+    has_fcf_increasing: bool = False
+    has_revenue_consistency: bool = False
+    has_conservative_debt: bool = False
+    has_capital_efficiency: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -84,6 +88,10 @@ class QualityAssessment:
             "has_positive_fcf": self.has_positive_fcf,
             "has_dividend_consistency": self.has_dividend_consistency,
             "has_adequate_liquidity": self.has_adequate_liquidity,
+            "has_fcf_increasing": self.has_fcf_increasing,
+            "has_revenue_consistency": self.has_revenue_consistency,
+            "has_conservative_debt": self.has_conservative_debt,
+            "has_capital_efficiency": self.has_capital_efficiency,
         }
 
 
@@ -159,6 +167,26 @@ def assess_quality(
     cr_factor = _assess_current_ratio(sorted_fs)
     assessment.factors.append(cr_factor)
     assessment.has_adequate_liquidity = cr_factor.passed
+
+    # Factor 7: FCF strictly increasing (last 3+ consecutive years)
+    fcf_inc_factor = _assess_fcf_increasing(sorted_fs)
+    assessment.factors.append(fcf_inc_factor)
+    assessment.has_fcf_increasing = fcf_inc_factor.passed
+
+    # Factor 8: Revenue growth consistency (grew in 80%+ of years)
+    rev_factor = _assess_revenue_consistency(sorted_fs)
+    assessment.factors.append(rev_factor)
+    assessment.has_revenue_consistency = rev_factor.passed
+
+    # Factor 9: Conservative debt (total liabilities < 4x net income)
+    debt_factor = _assess_conservative_debt(sorted_fs)
+    assessment.factors.append(debt_factor)
+    assessment.has_conservative_debt = debt_factor.passed
+
+    # Factor 10: Capital efficiency (FCF/Revenue > 5%)
+    capeff_factor = _assess_capital_efficiency(sorted_fs)
+    assessment.factors.append(capeff_factor)
+    assessment.has_capital_efficiency = capeff_factor.passed
 
     # Score
     assessment.score = sum(1 for f in assessment.factors if f.passed)
@@ -360,6 +388,128 @@ def _assess_current_ratio(financials: list[FinancialStatement]) -> QualityScore:
         value=None,
         threshold="> 1.0",
         detail="No current ratio data available",
+    )
+
+
+def _assess_fcf_increasing(financials: list[FinancialStatement]) -> QualityScore:
+    """FCF strictly increasing for last 3+ consecutive years."""
+    fcfs = []
+    for fs in financials:
+        fcf = _safe_float(fs.free_cash_flow)
+        if fcf is not None:
+            fcfs.append((fs.fiscal_year, fcf))
+
+    if len(fcfs) < 3:
+        return QualityScore(
+            name="FCF Increasing (3+ yrs)",
+            passed=False,
+            value=None,
+            threshold="FCF increasing for 3+ consecutive years",
+            detail=f"Insufficient FCF data ({len(fcfs)} years)",
+        )
+
+    # Check last 3 consecutive years
+    recent = fcfs[-3:]
+    consecutive_increases = all(
+        recent[i][1] > recent[i - 1][1] for i in range(1, len(recent))
+    )
+
+    return QualityScore(
+        name="FCF Increasing (3+ yrs)",
+        passed=consecutive_increases,
+        value=len([1 for i in range(1, len(fcfs)) if fcfs[i][1] > fcfs[i - 1][1]]),
+        threshold="FCF increasing for 3+ consecutive years",
+        detail=f"Last 3 years: {'increasing' if consecutive_increases else 'not consistently increasing'}",
+    )
+
+
+def _assess_revenue_consistency(financials: list[FinancialStatement]) -> QualityScore:
+    """Revenue grew in 80%+ of years."""
+    revenues = []
+    for fs in financials:
+        rev = _safe_float(fs.revenue)
+        if rev is not None:
+            revenues.append((fs.fiscal_year, rev))
+
+    if len(revenues) < 2:
+        return QualityScore(
+            name="Revenue Growth Consistency",
+            passed=False,
+            value=None,
+            threshold="Revenue grew in 80%+ of years",
+            detail=f"Insufficient revenue data ({len(revenues)} years)",
+        )
+
+    growth_years = sum(
+        1 for i in range(1, len(revenues)) if revenues[i][1] > revenues[i - 1][1]
+    )
+    total_pairs = len(revenues) - 1
+    ratio = growth_years / total_pairs
+
+    return QualityScore(
+        name="Revenue Growth Consistency",
+        passed=ratio >= 0.8,
+        value=round(ratio, 2),
+        threshold="Revenue grew in 80%+ of years",
+        detail=f"Revenue grew in {growth_years}/{total_pairs} years ({ratio:.0%})",
+    )
+
+
+def _assess_conservative_debt(financials: list[FinancialStatement]) -> QualityScore:
+    """Conservative debt: total liabilities < 4x net income (latest year)."""
+    for fs in reversed(financials):
+        ni = _safe_float(fs.net_income)
+        liabilities = _safe_float(fs.total_liabilities)
+
+        # Compute liabilities from assets - equity if not directly available
+        if liabilities is None:
+            assets = _safe_float(fs.total_assets)
+            equity = _safe_float(fs.total_equity)
+            if assets is not None and equity is not None:
+                liabilities = assets - equity
+
+        if ni is not None and ni > 0 and liabilities is not None:
+            ratio = liabilities / ni
+            passed = ratio < 4.0
+            return QualityScore(
+                name="Conservative Debt (LT Debt < 4x NI)",
+                passed=passed,
+                value=round(ratio, 2),
+                threshold="Total liabilities < 4x net income",
+                detail=f"Liabilities/NI ratio: {ratio:.1f}x (FY{fs.fiscal_year})",
+            )
+
+    return QualityScore(
+        name="Conservative Debt (LT Debt < 4x NI)",
+        passed=False,
+        value=None,
+        threshold="Total liabilities < 4x net income",
+        detail="Insufficient data (need net income > 0 and liabilities)",
+    )
+
+
+def _assess_capital_efficiency(financials: list[FinancialStatement]) -> QualityScore:
+    """Capital efficiency: FCF/Revenue > 5% (latest year)."""
+    for fs in reversed(financials):
+        fcf = _safe_float(fs.free_cash_flow)
+        rev = _safe_float(fs.revenue)
+        if fcf is not None and rev is not None and rev > 0:
+            ratio = fcf / rev
+            passed = ratio > 0.05
+            return QualityScore(
+                name="Capital Efficiency (FCF/Rev > 5%)",
+                passed=passed,
+                value=round(ratio, 4),
+                threshold="FCF / Revenue > 5%",
+                detail=f"FCF/Revenue: {ratio:.1%} (FY{fs.fiscal_year})",
+            )
+
+    return QualityScore(
+        name="Capital Efficiency (FCF/Rev > 5%)",
+        passed=False,
+        value=None,
+        threshold="FCF / Revenue > 5%",
+        detail="No FCF or revenue data available",
     )
 
 
