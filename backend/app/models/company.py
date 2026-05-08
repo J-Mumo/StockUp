@@ -19,6 +19,8 @@ class Company(Base):
     industry: Mapped[str | None] = mapped_column(String(100), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     website: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    investor_relations_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    marketscreener_graphics_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     shares_outstanding: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

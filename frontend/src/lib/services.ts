@@ -3,6 +3,7 @@ import type {
   AuthResponse,
   Market,
   Company,
+  CompanyDetail,
   PriceHistory,
   FinancialStatement,
   IntrinsicValue,
@@ -36,8 +37,8 @@ export const stocksApi = {
   getCompanies: (params?: { search?: string; sector?: string }) =>
     api.get<Company[]>('/stocks/companies', { params }),
   getSectors: () => api.get<string[]>('/stocks/companies/sectors'),
-  getCompany: (id: number) => api.get<Company>(`/stocks/companies/${id}`),
-  getPrices: (id: number) => api.get<PriceHistory[]>(`/stocks/companies/${id}/prices`),
+  getCompany: (id: number) => api.get<CompanyDetail>(`/stocks/companies/${id}`),
+  getPrices: (id: number) => api.get<PriceHistory[]>(`/stocks/companies/${id}/prices`, { params: { limit: 5000 } }),
   getFinancials: (id: number) => api.get<FinancialStatement[]>(`/stocks/companies/${id}/financials`),
   createFinancial: (id: number, data: Partial<FinancialStatement>) =>
     api.post<FinancialStatement>(`/stocks/companies/${id}/financials`, data),
@@ -51,8 +52,15 @@ export const stocksApi = {
 
 // Analysis
 export const analysisApi = {
-  computeValuation: (companyId: number) =>
-    api.post<IntrinsicValue>(`/analysis/companies/${companyId}/compute`),
+  computeValuation: (companyId: number, assumptions?: {
+    discount_rate?: number;
+    terminal_growth_rate?: number;
+    projection_years?: number;
+    dcf_weight?: number;
+    epv_weight?: number;
+    bv_weight?: number;
+  }) =>
+    api.post<IntrinsicValue>(`/analysis/companies/${companyId}/compute`, assumptions || {}),
   getRecommendation: (companyId: number) =>
     api.get<Recommendation>(`/analysis/companies/${companyId}/recommendation`),
   getValuations: (companyId: number) =>
@@ -84,6 +92,15 @@ export const portfolioApi = {
   }) => api.post<Transaction>(`/portfolio/${id}/transactions`, data),
   getHoldings: (id: number) => api.get<HoldingsListResponse>(`/portfolio/${id}/holdings`),
   getPerformance: (id: number) => api.get<PortfolioPerformance>(`/portfolio/${id}/performance`),
+  updateTransaction: (portfolioId: number, transactionId: number, data: {
+    transaction_type?: 'buy' | 'sell';
+    quantity?: number;
+    price_per_share?: number;
+    transaction_date?: string;
+    notes?: string;
+  }) => api.put<Transaction>(`/portfolio/${portfolioId}/transactions/${transactionId}`, data),
+  deleteTransaction: (portfolioId: number, transactionId: number) =>
+    api.delete(`/portfolio/${portfolioId}/transactions/${transactionId}`),
 };
 
 // Alerts

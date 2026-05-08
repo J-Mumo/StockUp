@@ -173,11 +173,28 @@ def calculate_dcf(
         result.error = "Invalid or missing shares_outstanding"
         return result
 
-    # Extract FCF data (sorted by year ascending)
+    # Extract FCF data (sorted by year ascending) with sanity checks
     fcf_data = []
     for fs in sorted(financials, key=lambda f: f.fiscal_year):
         fcf = _get_numeric(fs.free_cash_flow)
         if fcf is not None:
+            # Sanity guard: FCF cannot reasonably exceed revenue or be
+            # wildly disproportionate to net income.  AI-enriched data
+            # sometimes hallucinates OCF/FCF for banks.
+            revenue = _get_numeric(fs.revenue)
+            net_income = _get_numeric(fs.net_income)
+
+            if revenue and revenue > 0 and net_income is not None:
+                max_reasonable = max(abs(net_income), revenue * 0.30)
+                if fcf > max_reasonable * 1.5:
+                    logger.warning(
+                        "FCF sanity cap: company_id=%s year=%s FCF=%.0f "
+                        "capped to %.0f (revenue=%.0f, net_income=%.0f)",
+                        fs.company_id, fs.fiscal_year, fcf,
+                        max_reasonable, revenue, net_income,
+                    )
+                    fcf = max_reasonable
+
             fcf_data.append(fcf)
 
     result.historical_fcfs = fcf_data

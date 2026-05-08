@@ -34,6 +34,24 @@ export interface Company {
   index_membership: string | null; // "NSE 20", "NSE 25", or null
 }
 
+export interface CompanyDetail {
+  id: number;
+  market_id: number;
+  name: string;
+  ticker_symbol: string;
+  yfinance_ticker: string | null;
+  sector: string | null;
+  industry: string | null;
+  description: string | null;
+  website: string | null;
+  shares_outstanding: number | null;
+  is_active: boolean;
+  latest_price: number | null;
+  latest_change_pct: number | null;
+  latest_price_date: string | null;
+  latest_valuation: IntrinsicValue | null;
+}
+
 export interface PriceHistory {
   id: number;
   price_date: string;

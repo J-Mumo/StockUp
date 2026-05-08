@@ -254,6 +254,59 @@ class TestBackfillCompanyPrices:
         assert stats["upserted"] == 2
         assert stats["total"] == 2
 
+    @patch("app.data.price_fetcher.marketscreener_adapter")
+    def test_backfill_marketscreener_success(
+        self, mock_marketscreener, db: Session, company: Company
+    ):
+        """A verified Marketscreener URL should be used before other sources."""
+        company.marketscreener_graphics_url = "https://example.com/kcb/graphics/"
+        mock_marketscreener.fetch_history_sync.return_value = [
+            {
+                "date": "2026-04-25",
+                "open": 41.5,
+                "high": 42.5,
+                "low": 41.25,
+                "close": 42.0,
+                "volume": 300_000,
+            },
+            {
+                "date": "2026-04-24",
+                "open": 41.25,
+                "high": 42.0,
+                "low": 41.0,
+                "close": 41.75,
+                "volume": 250_000,
+            },
+        ]
+        mock_marketscreener.candles_to_price_rows.return_value = [
+            {
+                "price_date": date(2026, 4, 25),
+                "close_price": 42.0,
+                "volume": 300_000,
+                "source": "marketscreener",
+            },
+            {
+                "price_date": date(2026, 4, 24),
+                "close_price": 41.75,
+                "volume": 250_000,
+                "source": "marketscreener",
+            },
+        ]
+
+        with patch("app.data.price_fetcher.settings") as mock_settings:
+            mock_settings.marketscreener_enabled = True
+            mock_settings.kenyanstocks_enabled = False
+            mock_settings.scraper_enabled = False
+            mock_settings.yfinance_enabled = False
+
+            stats = backfill_company_prices(db, company, delay=0)
+
+        assert stats["source"] == "marketscreener"
+        assert stats["upserted"] == 2
+        mock_marketscreener.fetch_history_sync.assert_called_once_with(
+            "https://example.com/kcb/graphics/"
+        )
+
     @patch("app.data.price_fetcher.nse_scraper")
     @patch("app.data.price_fetcher.yfinance_adapter")
     def test_backfill_scraper_empty_falls_to_yfinance(

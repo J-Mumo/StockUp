@@ -62,6 +62,15 @@ class TransactionCreate(BaseModel):
     notes: str | None = None
 
 
+class TransactionUpdate(BaseModel):
+    """Payload for updating an existing transaction."""
+    transaction_type: str | None = Field(None, pattern=r"^(buy|sell)$")
+    quantity: float | None = Field(None, gt=0)
+    price_per_share: float | None = Field(None, gt=0)
+    transaction_date: date | None = None
+    notes: str | None = None
+
+
 class TransactionResponse(BaseModel):
     """Transaction response schema."""
     id: int

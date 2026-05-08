@@ -14,7 +14,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.models.company import Company
 from app.models.price_history import PriceHistory
-from app.data import nse_scraper, yfinance_adapter, kenyanstocks_adapter
+from app.data import nse_scraper, yfinance_adapter, kenyanstocks_adapter, marketscreener_adapter
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -123,13 +123,37 @@ def backfill_company_prices(
     """Backfill historical prices for a single company.
     
     Strategy (priority order):
-    1. Try kenyanstocks.com (~248 days OHLCV, best coverage)
-    2. Try afx scraper for company history page (~10 days)
-    3. Try yfinance for full history
+    1. Try Marketscreener if a verified graphics URL is stored
+    2. Try kenyanstocks.com (~248 days OHLCV)
+    3. Try afx scraper for company history page (~10 days)
+    4. Try yfinance for full history
     
     Returns dict with stats.
     """
     stats = {"total": 0, "upserted": 0, "source": "none"}
+
+    if settings.marketscreener_enabled and company.marketscreener_graphics_url:
+        try:
+            prices = marketscreener_adapter.candles_to_price_rows(
+                marketscreener_adapter.fetch_history_sync(company.marketscreener_graphics_url)
+            )
+            if prices:
+                stats["source"] = "marketscreener"
+                for price_data in prices:
+                    if price_data.get("close_price"):
+                        upsert_price(db, company.id, price_data)
+                        stats["upserted"] += 1
+                    stats["total"] += 1
+                db.commit()
+                logger.info(
+                    f"Backfilled {company.ticker_symbol} via marketscreener: "
+                    f"{stats['upserted']} prices"
+                )
+                return stats
+        except Exception as e:
+            logger.warning(
+                f"Marketscreener backfill failed for {company.ticker_symbol}: {e}"
+            )
 
     # Priority 1: kenyanstocks.com (best — ~248 days of OHLCV)
     if settings.kenyanstocks_enabled:

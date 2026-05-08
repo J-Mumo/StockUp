@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models.market import Market
 from app.models.company import Company
+from app.data.marketscreener_registry import VERIFIED_MARKETSCREENER_URLS
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,9 @@ def seed_nse_market_and_companies(db: Session) -> dict:
         ).first()
 
         if existing:
+            ms_url = VERIFIED_MARKETSCREENER_URLS.get(company_data["ticker"])
+            if ms_url and not existing.marketscreener_graphics_url:
+                existing.marketscreener_graphics_url = ms_url
             stats["companies_existing"] += 1
             continue
 
@@ -125,6 +129,7 @@ def seed_nse_market_and_companies(db: Session) -> dict:
             ticker_symbol=company_data["ticker"],
             yfinance_ticker=company_data["yf"],
             sector=company_data["sector"],
+            marketscreener_graphics_url=VERIFIED_MARKETSCREENER_URLS.get(company_data["ticker"]),
             is_active=True,
         )
         db.add(company)

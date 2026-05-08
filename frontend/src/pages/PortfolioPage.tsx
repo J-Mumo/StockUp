@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { Plus, Briefcase, TrendingUp, TrendingDown, X } from 'lucide-react';
+import { Plus, Briefcase, TrendingUp, TrendingDown, X, Pencil, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { portfolioApi, stocksApi } from '../lib/services';
 import type { Portfolio, Holding, HoldingsListResponse, Transaction, PortfolioPerformance, Company } from '../types';
@@ -11,6 +11,14 @@ interface TransactionForm {
   company_id: number;
   transaction_type: 'buy' | 'sell';
   shares: number;
+  price_per_share: number;
+  transaction_date: string;
+  notes: string;
+}
+
+interface EditTransactionForm {
+  transaction_type: 'buy' | 'sell';
+  quantity: number;
   price_per_share: number;
   transaction_date: string;
   notes: string;
@@ -27,10 +35,12 @@ export default function PortfolioPage() {
   const [showCreatePortfolio, setShowCreatePortfolio] = useState(false);
   const [showAddTransaction, setShowAddTransaction] = useState(false);
   const [newPortfolioName, setNewPortfolioName] = useState('');
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
 
   const { register, handleSubmit, reset, setValue } = useForm<TransactionForm>({
     defaultValues: { transaction_type: 'buy', transaction_date: new Date().toISOString().split('T')[0] },
   });
+  const { register: registerEdit, handleSubmit: handleEditSubmit, reset: resetEdit, setValue: setEditValue } = useForm<EditTransactionForm>();
   const [companySearch, setCompanySearch] = useState('');
   const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false);
   const [selectedCompanyLabel, setSelectedCompanyLabel] = useState('');
@@ -120,6 +130,47 @@ export default function PortfolioPage() {
       toast.success('Portfolio deleted');
     } catch {
       toast.error('Failed to delete portfolio');
+    }
+  };
+
+  const deleteTransaction = async (transactionId: number) => {
+    if (!selectedPortfolio) return;
+    if (!confirm('Delete this transaction? This will affect your holdings.')) return;
+    try {
+      await portfolioApi.deleteTransaction(selectedPortfolio.id, transactionId);
+      toast.success('Transaction deleted');
+      selectPortfolio(selectedPortfolio);
+    } catch {
+      toast.error('Failed to delete transaction');
+    }
+  };
+
+  const openEditTransaction = (t: Transaction) => {
+    setEditingTransaction(t);
+    resetEdit({
+      transaction_type: t.transaction_type as 'buy' | 'sell',
+      quantity: t.quantity,
+      price_per_share: t.price_per_share,
+      transaction_date: t.transaction_date,
+      notes: t.notes || '',
+    });
+  };
+
+  const onEditTransaction = async (data: EditTransactionForm) => {
+    if (!selectedPortfolio || !editingTransaction) return;
+    try {
+      await portfolioApi.updateTransaction(selectedPortfolio.id, editingTransaction.id, {
+        transaction_type: data.transaction_type,
+        quantity: Number(data.quantity),
+        price_per_share: Number(data.price_per_share),
+        transaction_date: data.transaction_date,
+        notes: data.notes || undefined,
+      });
+      toast.success('Transaction updated');
+      setEditingTransaction(null);
+      selectPortfolio(selectedPortfolio);
+    } catch {
+      toast.error('Failed to update transaction');
     }
   };
 
@@ -302,11 +353,12 @@ export default function PortfolioPage() {
                       <th className="pb-3 font-medium text-right">Shares</th>
                       <th className="pb-3 font-medium text-right">Price</th>
                       <th className="pb-3 font-medium text-right">Total</th>
+                      <th className="pb-3 font-medium text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {transactions.map((t) => (
-                      <tr key={t.id} className="border-b border-dark-border/50">
+                      <tr key={t.id} className="border-b border-dark-border/50 group">
                         <td className="py-3 text-gray-300">{t.transaction_date}</td>
                         <td className="py-3">
                           <span className={`flex items-center gap-1 ${t.transaction_type === 'buy' ? 'text-gain' : 'text-loss'}`}>
@@ -318,6 +370,24 @@ export default function PortfolioPage() {
                         <td className="py-3 text-right text-gray-300">{t.quantity}</td>
                         <td className="py-3 text-right text-gray-300">{t.price_per_share.toFixed(2)}</td>
                         <td className="py-3 text-right text-gray-300">{formatCurrency(t.total_amount)}</td>
+                        <td className="py-3 text-right">
+                          <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={() => openEditTransaction(t)}
+                              className="p-1.5 text-gray-400 hover:text-primary-400 hover:bg-dark-border/50 rounded-md transition-colors"
+                              title="Edit transaction"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              onClick={() => deleteTransaction(t.id)}
+                              className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-dark-border/50 rounded-md transition-colors"
+                              title="Delete transaction"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -452,6 +522,78 @@ export default function PortfolioPage() {
                   <div className="flex gap-3 justify-end">
                     <button type="button" onClick={() => setShowAddTransaction(false)} className="px-4 py-2 text-gray-400 hover:text-white">Cancel</button>
                     <button type="submit" className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg">Record</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Edit Transaction Modal */}
+          {editingTransaction && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+              <div className="bg-dark-surface border border-dark-border rounded-xl p-6 w-full max-w-md">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-white">Edit Transaction</h3>
+                  <button onClick={() => setEditingTransaction(null)} className="text-gray-400 hover:text-white">
+                    <X size={20} />
+                  </button>
+                </div>
+                <p className="text-sm text-gray-400 mb-4">
+                  {editingTransaction.company_name || editingTransaction.company_ticker || `Company #${editingTransaction.company_id}`}
+                </p>
+                <form onSubmit={handleEditSubmit(onEditTransaction)} className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-1">Type</label>
+                      <select
+                        {...registerEdit('transaction_type')}
+                        className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      >
+                        <option value="buy">Buy</option>
+                        <option value="sell">Sell</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-1">Date</label>
+                      <input
+                        type="date"
+                        {...registerEdit('transaction_date')}
+                        className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-1">Shares</label>
+                      <input
+                        type="number"
+                        step="any"
+                        {...registerEdit('quantity', { required: true })}
+                        className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-1">Price per Share</label>
+                      <input
+                        type="number"
+                        step="any"
+                        {...registerEdit('price_per_share', { required: true })}
+                        className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-300 mb-1">Notes (optional)</label>
+                    <input
+                      type="text"
+                      {...registerEdit('notes')}
+                      className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      placeholder="Optional notes"
+                    />
+                  </div>
+                  <div className="flex gap-3 justify-end">
+                    <button type="button" onClick={() => setEditingTransaction(null)} className="px-4 py-2 text-gray-400 hover:text-white">Cancel</button>
+                    <button type="submit" className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg">Save Changes</button>
                   </div>
                 </form>
               </div>

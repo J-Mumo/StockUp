@@ -37,6 +37,7 @@ from app.schemas.portfolio import (
     PortfolioUpdate,
     TransactionCreate,
     TransactionResponse,
+    TransactionUpdate,
 )
 
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
@@ -207,6 +208,74 @@ def list_transactions(
     } if company_ids else {}
 
     return [_transaction_to_response(t, companies.get(t.company_id)) for t in transactions]
+
+
+@router.put(
+    "/{portfolio_id}/transactions/{transaction_id}",
+    response_model=TransactionResponse,
+)
+def update_transaction(
+    portfolio_id: int,
+    transaction_id: int,
+    payload: TransactionUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update an existing transaction."""
+    _get_user_portfolio(db, portfolio_id, current_user.id)
+
+    txn = (
+        db.query(PortfolioTransaction)
+        .filter(
+            PortfolioTransaction.id == transaction_id,
+            PortfolioTransaction.portfolio_id == portfolio_id,
+        )
+        .first()
+    )
+    if txn is None:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    update_data = payload.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(txn, field, value)
+
+    # Recalculate total_amount if quantity or price changed
+    if "quantity" in update_data or "price_per_share" in update_data:
+        txn.total_amount = txn.quantity * txn.price_per_share
+
+    db.commit()
+    db.refresh(txn)
+
+    company = db.query(Company).filter(Company.id == txn.company_id).first()
+    return _transaction_to_response(txn, company)
+
+
+@router.delete(
+    "/{portfolio_id}/transactions/{transaction_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_transaction(
+    portfolio_id: int,
+    transaction_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a transaction."""
+    _get_user_portfolio(db, portfolio_id, current_user.id)
+
+    txn = (
+        db.query(PortfolioTransaction)
+        .filter(
+            PortfolioTransaction.id == transaction_id,
+            PortfolioTransaction.portfolio_id == portfolio_id,
+        )
+        .first()
+    )
+    if txn is None:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    db.delete(txn)
+    db.commit()
 
 
 # ---------------------------------------------------------------------------

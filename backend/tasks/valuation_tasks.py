@@ -201,3 +201,94 @@ def refresh_all_financials(self):
         raise self.retry(exc=exc)
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# Monthly Annual Report Parsing (PDF → OpenAI extraction)
+# ---------------------------------------------------------------------------
+
+
+@celery_app.task(
+    name="tasks.valuation_tasks.parse_annual_reports",
+    bind=True,
+    max_retries=1,
+    default_retry_delay=600,
+    acks_late=True,
+    time_limit=7200,  # 2 hour hard limit
+    soft_time_limit=6600,  # 1h50m soft limit
+)
+def parse_annual_reports(self):
+    """Parse annual report PDFs for all companies and extract financial data.
+
+    Downloads PDFs from company IR websites (if not cached), sends them to
+    OpenAI GPT-4.1 for structured extraction, validates results, and upserts
+    into the DB. After parsing, recomputes valuations for any company that
+    received new data.
+
+    Runs monthly on the 5th at 3AM EAT (00:00 UTC) — a few days after
+    companies typically publish reports.
+    """
+    from app.database import SessionLocal
+    from app.data.annual_report_parser import parse_all_companies
+    from app.services.valuation_engine import compute_valuation
+    from app.models.company import Company
+
+    started_at = datetime.utcnow()
+    current_year = started_at.year
+    # Parse current year and previous year (reports may be published with a lag)
+    years = range(current_year - 1, current_year + 1)
+
+    logger.info(
+        f"[valuation_tasks] Starting annual report parsing at {started_at.isoformat()} "
+        f"for years {list(years)}"
+    )
+
+    db = SessionLocal()
+    try:
+        # Step 1: Parse reports for all active companies
+        summary = parse_all_companies(db, tickers=None, years=years, delay=5.0)
+
+        parsed = summary.get("extracted", 0)
+        failed = summary.get("failed", 0)
+        logger.info(
+            f"[valuation_tasks] Report parsing complete: "
+            f"parsed={parsed}, failed={failed}"
+        )
+
+        # Step 2: Recompute valuations if any data was extracted
+        valued = 0
+        if parsed > 0:
+            companies = (
+                db.query(Company)
+                .filter(Company.is_active == True)
+                .all()
+            )
+            for company in companies:
+                try:
+                    result = compute_valuation(db, company.id)
+                    if not isinstance(result, str):
+                        valued += 1
+                except Exception as val_err:
+                    logger.warning(
+                        f"[valuation_tasks] Valuation failed for {company.ticker_symbol}: {val_err}"
+                    )
+            db.commit()
+            logger.info(f"[valuation_tasks] Recomputed valuations for {valued} companies")
+
+        elapsed = (datetime.utcnow() - started_at).total_seconds()
+        logger.info(f"[valuation_tasks] Annual report task complete in {elapsed:.1f}s")
+
+        return {
+            "status": "success",
+            "reports_parsed": parsed,
+            "reports_failed": failed,
+            "companies_revalued": valued,
+            "years": list(years),
+            "elapsed_seconds": elapsed,
+        }
+    except Exception as exc:
+        db.rollback()
+        logger.error(f"[valuation_tasks] Annual report parsing failed: {exc}", exc_info=True)
+        raise self.retry(exc=exc)
+    finally:
+        db.close()

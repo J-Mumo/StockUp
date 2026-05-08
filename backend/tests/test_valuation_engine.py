@@ -336,22 +336,20 @@ class TestBookValue:
 
 class TestWeightedIV:
     def test_all_methods_available(self):
-        """With all 3 methods, uses default 50/30/20 weights."""
+        """With DCF available, uses pure DCF (100% weight)."""
         iv, weights = calculate_weighted_intrinsic_value(100.0, 80.0, 60.0)
-        # 0.5*100 + 0.3*80 + 0.2*60 = 50 + 24 + 12 = 86
-        assert iv == pytest.approx(86.0)
-        assert weights["dcf"] == pytest.approx(0.5)
-        assert weights["epv"] == pytest.approx(0.3)
-        assert weights["bv"] == pytest.approx(0.2)
+        # Pure DCF strategy: 100% DCF when available
+        assert iv == pytest.approx(100.0)
+        assert weights["dcf"] == pytest.approx(1.0)
 
     def test_dcf_missing(self):
-        """Without DCF, redistributes weight to EPV and BV."""
+        """Without DCF, falls back to EPV(70%) + BV(30%)."""
         iv, weights = calculate_weighted_intrinsic_value(None, 80.0, 60.0)
-        # Weights: EPV=0.3/(0.3+0.2)=0.6, BV=0.2/(0.3+0.2)=0.4
-        # IV = 0.6*80 + 0.4*60 = 48 + 24 = 72
-        assert iv == pytest.approx(72.0)
-        assert weights["epv"] == pytest.approx(0.6)
-        assert weights["bv"] == pytest.approx(0.4)
+        # Fallback weights: EPV=0.7, BV=0.3
+        # IV = 0.7*80 + 0.3*60 = 56 + 18 = 74
+        assert iv == pytest.approx(74.0)
+        assert weights["epv"] == pytest.approx(0.7)
+        assert weights["bv"] == pytest.approx(0.3)
 
     def test_only_bv_available(self):
         """Only BV available — gets 100% weight."""
@@ -372,11 +370,21 @@ class TestWeightedIV:
         assert "bv" in weights
 
     def test_custom_weights(self):
-        """Custom weights are respected."""
-        custom = {"dcf_weight": 0.7, "epv_weight": 0.2, "bv_weight": 0.1}
+        """Custom fallback weights are respected (DCF still takes priority)."""
+        custom = {"fallback_epv_weight": 0.6, "fallback_bv_weight": 0.4}
+        # With DCF available, still uses pure DCF
         iv, weights = calculate_weighted_intrinsic_value(100.0, 80.0, 60.0, custom)
-        # 0.7*100 + 0.2*80 + 0.1*60 = 70 + 16 + 6 = 92
-        assert iv == pytest.approx(92.0)
+        assert iv == pytest.approx(100.0)
+        assert weights["dcf"] == pytest.approx(1.0)
+
+    def test_custom_fallback_weights_without_dcf(self):
+        """Custom fallback weights apply when DCF is unavailable."""
+        custom = {"fallback_epv_weight": 0.6, "fallback_bv_weight": 0.4}
+        iv, weights = calculate_weighted_intrinsic_value(None, 80.0, 60.0, custom)
+        # IV = 0.6*80 + 0.4*60 = 48 + 24 = 72
+        assert iv == pytest.approx(72.0)
+        assert weights["epv"] == pytest.approx(0.6)
+        assert weights["bv"] == pytest.approx(0.4)
 
 
 # ---------------------------------------------------------------------------

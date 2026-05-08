@@ -94,4 +94,9 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(hour=23, minute=0, day_of_month="1"),  # 1st of month, 2AM EAT (23:00 UTC prev day)
         "options": {"queue": "default"},
     },
+    "monthly-annual-report-parsing": {
+        "task": "tasks.valuation_tasks.parse_annual_reports",
+        "schedule": crontab(hour=0, minute=0, day_of_month="5"),  # 5th of month, 3AM EAT (00:00 UTC)
+        "options": {"queue": "default"},
+    },
 }

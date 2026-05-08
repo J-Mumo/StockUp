@@ -1,12 +1,12 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, ReferenceLine, ComposedChart,
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, ReferenceLine, ComposedChart, BarChart, Bar,
 } from 'recharts';
-import { ArrowLeft, TrendingUp, Calculator, FileText, RefreshCw, BarChart3 } from 'lucide-react';
+import { ArrowLeft, TrendingUp, Calculator, FileText, RefreshCw, BarChart3, ExternalLink, Edit3, Info, RotateCcw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { stocksApi, analysisApi } from '../lib/services';
-import type { Company, PriceHistory, FinancialStatement, IntrinsicValue, Recommendation, ValuationTrendPoint } from '../types';
+import type { CompanyDetail, PriceHistory, FinancialStatement, IntrinsicValue, Recommendation, ValuationTrendPoint } from '../types';
 import { PageLoader } from '../components/ui/LoadingSpinner';
 
 type TimePeriod = '1M' | '3M' | '6M' | '1Y' | 'ALL';
@@ -19,11 +19,41 @@ const PERIOD_DAYS: Record<TimePeriod, number> = {
   'ALL': 9999,
 };
 
+// Format large numbers
+function fmtNum(value: number | null, decimals = 1): string {
+  if (value == null) return '—';
+  const abs = Math.abs(value);
+  if (abs >= 1e12) return (value / 1e12).toFixed(decimals) + 'T';
+  if (abs >= 1e9) return (value / 1e9).toFixed(decimals) + 'B';
+  if (abs >= 1e6) return (value / 1e6).toFixed(decimals) + 'M';
+  if (abs >= 1e3) return (value / 1e3).toFixed(decimals) + 'K';
+  return value.toFixed(decimals);
+}
+
+function fmtPct(value: number | null): string {
+  if (value == null) return '—';
+  return (value * 100).toFixed(1) + '%';
+}
+
+function fmtKES(value: number | null): string {
+  if (value == null) return '—';
+  return 'KES ' + value.toFixed(2);
+}
+
+function getDataSource(notes: string | null): { label: string; color: string } {
+  if (!notes) return { label: 'Unknown', color: 'bg-gray-600' };
+  if (notes.includes('[PDF annual report]')) return { label: 'PDF', color: 'bg-blue-600' };
+  if (notes.includes('[AI enriched')) return { label: 'AI', color: 'bg-purple-600' };
+  if (notes.includes('Manual')) return { label: 'Manual', color: 'bg-green-600' };
+  if (notes.includes('kenyanstocks')) return { label: 'Scraped', color: 'bg-orange-600' };
+  return { label: 'Auto', color: 'bg-gray-600' };
+}
+
 export default function CompanyDetailPage() {
   const { id } = useParams<{ id: string }>();
   const companyId = Number(id);
 
-  const [company, setCompany] = useState<Company | null>(null);
+  const [company, setCompany] = useState<CompanyDetail | null>(null);
   const [prices, setPrices] = useState<PriceHistory[]>([]);
   const [financials, setFinancials] = useState<FinancialStatement[]>([]);
   const [valuation, setValuation] = useState<IntrinsicValue | null>(null);
@@ -33,6 +63,16 @@ export default function CompanyDetailPage() {
   const [computing, setComputing] = useState(false);
   const [pricePeriod, setPricePeriod] = useState<TimePeriod>('3M');
   const [trendPeriod, setTrendPeriod] = useState<TimePeriod>('1Y');
+  const [showAssumptions, setShowAssumptions] = useState(false);
+
+  // Custom assumptions for stress-testing
+  const [customDiscountRate, setCustomDiscountRate] = useState<string>('');
+  const [customTerminalGrowth, setCustomTerminalGrowth] = useState<string>('');
+  const [customProjectionYears, setCustomProjectionYears] = useState<string>('');
+  const [customDcfWeight, setCustomDcfWeight] = useState<string>('');
+  const [customEpvWeight, setCustomEpvWeight] = useState<string>('');
+  const [customBvWeight, setCustomBvWeight] = useState<string>('');
+  const [isCustom, setIsCustom] = useState(false);
 
   useEffect(() => {
     if (!companyId) return;
@@ -57,14 +97,23 @@ export default function CompanyDetailPage() {
       .finally(() => setLoading(false));
   }, [companyId]);
 
-  const handleCompute = async () => {
+  const handleCompute = async (useCustom = false) => {
     setComputing(true);
     try {
-      const res = await analysisApi.computeValuation(companyId);
+      const customAssumptions = useCustom ? {
+        ...(customDiscountRate ? { discount_rate: parseFloat(customDiscountRate) / 100 } : {}),
+        ...(customTerminalGrowth ? { terminal_growth_rate: parseFloat(customTerminalGrowth) / 100 } : {}),
+        ...(customProjectionYears ? { projection_years: parseInt(customProjectionYears) } : {}),
+        ...(customDcfWeight ? { dcf_weight: parseFloat(customDcfWeight) / 100 } : {}),
+        ...(customEpvWeight ? { epv_weight: parseFloat(customEpvWeight) / 100 } : {}),
+        ...(customBvWeight ? { bv_weight: parseFloat(customBvWeight) / 100 } : {}),
+      } : undefined;
+      const res = await analysisApi.computeValuation(companyId, customAssumptions);
       setValuation(res.data);
+      if (useCustom) setIsCustom(true);
       const recRes = await analysisApi.getRecommendation(companyId);
       setRecommendation(recRes.data);
-      toast.success('Valuation computed!');
+      toast.success(useCustom ? 'Custom valuation computed!' : 'Valuation computed!');
     } catch (err: unknown) {
       const detail =
         (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -75,7 +124,34 @@ export default function CompanyDetailPage() {
     }
   };
 
-  // Sort prices ascending (backend returns newest-first)
+  const resetAssumptions = () => {
+    setCustomDiscountRate('');
+    setCustomTerminalGrowth('');
+    setCustomProjectionYears('');
+    setCustomDcfWeight('');
+    setCustomEpvWeight('');
+    setCustomBvWeight('');
+    setIsCustom(false);
+  };
+
+  // Populate custom fields from current assumptions when panel opens
+  const populateFromCurrent = () => {
+    if (assumptions) {
+      setCustomDiscountRate((assumptions.discount_rate * 100).toFixed(0));
+      setCustomTerminalGrowth((assumptions.terminal_growth_rate * 100).toFixed(0));
+      setCustomProjectionYears(String(assumptions.projection_years));
+      if (calcDetails) {
+        const wa = (calcDetails as { weights_applied?: Record<string, number> }).weights_applied;
+        if (wa) {
+          setCustomDcfWeight(((wa.dcf ?? 0) * 100).toFixed(0));
+          setCustomEpvWeight(((wa.epv ?? 0) * 100).toFixed(0));
+          setCustomBvWeight(((wa.bv ?? 0) * 100).toFixed(0));
+        }
+      }
+    }
+  };
+
+  // Sort prices ascending
   const sortedPrices = useMemo(
     () => [...prices].sort((a, b) => a.price_date.localeCompare(b.price_date)),
     [prices]
@@ -96,27 +172,49 @@ export default function CompanyDetailPage() {
     if (trendData.length === 0) return [];
     const days = PERIOD_DAYS[trendPeriod];
     const sliced = days >= trendData.length ? trendData : trendData.slice(-days);
-
-    // Cap IV at 3x max market price
     const marketPrices = sliced.map(d => d.market_price).filter((v): v is number => v != null);
     const maxMarket = Math.max(...marketPrices, 1);
     const ivCap = maxMarket * 3;
-
     return sliced.map(d => ({
       ...d,
       intrinsic_value: d.intrinsic_value != null && d.intrinsic_value > ivCap ? ivCap : d.intrinsic_value,
     }));
   }, [trendData, trendPeriod]);
 
+  // Financial trend chart data
+  const financialChartData = useMemo(() => {
+    return [...financials]
+      .sort((a, b) => a.fiscal_year - b.fiscal_year)
+      .map(fs => ({
+        year: fs.fiscal_year.toString(),
+        revenue: fs.revenue ? fs.revenue / 1e9 : null,
+        net_income: fs.net_income ? fs.net_income / 1e9 : null,
+        fcf: fs.free_cash_flow ? fs.free_cash_flow / 1e9 : null,
+      }));
+  }, [financials]);
+
+  // Key ratios from latest financial
+  const latestFinancial = useMemo(() => {
+    if (financials.length === 0) return null;
+    return [...financials].sort((a, b) => b.fiscal_year - a.fiscal_year)[0];
+  }, [financials]);
+
   if (loading) return <PageLoader />;
   if (!company) return <p className="text-red-400">Company not found</p>;
 
-  // Current price for badge display
+  // Current price
   const currentPrice = sortedPrices.length > 0 ? sortedPrices[sortedPrices.length - 1].close_price : null;
   const prevPrice = sortedPrices.length > 1 ? sortedPrices[sortedPrices.length - 2].close_price : null;
   const priceChange = currentPrice && prevPrice ? currentPrice - prevPrice : null;
   const priceChangePct = priceChange && prevPrice ? (priceChange / prevPrice) * 100 : null;
   const isPositive = (priceChange ?? 0) >= 0;
+
+  // Key ratios
+  const pe = currentPrice && latestFinancial?.earnings_per_share ? currentPrice / latestFinancial.earnings_per_share : null;
+  const pb = currentPrice && latestFinancial?.book_value_per_share && latestFinancial.book_value_per_share > 0
+    ? currentPrice / latestFinancial.book_value_per_share : null;
+  const divYield = currentPrice && latestFinancial?.dividends_per_share
+    ? latestFinancial.dividends_per_share / currentPrice : null;
 
   const recColors: Record<string, string> = {
     'Strong Buy': 'bg-green-600',
@@ -128,11 +226,13 @@ export default function CompanyDetailPage() {
     'Strong Sell': 'bg-red-600',
   };
 
-  // TradingView-style chart colors
-  const tvBlue = '#2962FF';
   const tvGreen = '#26a69a';
   const tvRed = '#ef5350';
   const lineColor = isPositive ? tvGreen : tvRed;
+
+  // Assumptions from valuation
+  const assumptions = valuation?.assumptions as Record<string, number> | null;
+  const calcDetails = valuation?.calculation_details as Record<string, unknown> | null;
 
   return (
     <div>
@@ -142,10 +242,25 @@ export default function CompanyDetailPage() {
           <ArrowLeft className="text-gray-400" size={20} />
         </Link>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold text-white">{company.name}</h1>
-          <p className="text-gray-400">
-            {company.ticker_symbol} {company.sector && `• ${company.sector}`}
-          </p>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-white">{company.name}</h1>
+            {company.website && (
+              <a href={company.website} target="_blank" rel="noopener noreferrer" className="text-primary-400 hover:text-primary-300">
+                <ExternalLink size={16} />
+              </a>
+            )}
+          </div>
+          <div className="flex items-center gap-2 text-gray-400 text-sm">
+            <span>{company.ticker_symbol}</span>
+            {company.sector && <span>• {company.sector}</span>}
+            {company.industry && <span>• {company.industry}</span>}
+            {company.shares_outstanding && (
+              <span>• {fmtNum(company.shares_outstanding, 0)} shares</span>
+            )}
+          </div>
+          {company.description && (
+            <p className="text-gray-500 text-sm mt-1 line-clamp-2">{company.description}</p>
+          )}
         </div>
         {recommendation && recommendation.action && (
           <span className={`px-3 py-1.5 rounded-lg text-white text-sm font-medium ${recColors[recommendation.action] || 'bg-gray-500'}`}>
@@ -154,9 +269,8 @@ export default function CompanyDetailPage() {
         )}
       </div>
 
-      {/* Price Chart — TradingView Style */}
+      {/* Price Chart */}
       <div className="bg-[#131722] border border-[#2a2e39] rounded-xl p-5 mb-6">
-        {/* Chart Header */}
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-3">
             <h2 className="text-sm font-medium text-gray-400">{company.ticker_symbol}</h2>
@@ -174,7 +288,6 @@ export default function CompanyDetailPage() {
               </div>
             )}
           </div>
-          {/* Period Tabs */}
           <div className="flex gap-1">
             {(['1M', '3M', '6M', '1Y', 'ALL'] as TimePeriod[]).map((p) => (
               <button
@@ -195,62 +308,27 @@ export default function CompanyDetailPage() {
         {priceChartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={340}>
             <LineChart data={priceChartData} margin={{ top: 10, right: 60, bottom: 0, left: 0 }}>
-              <CartesianGrid
-                horizontal={true}
-                vertical={false}
-                stroke="#1e222d"
-                strokeWidth={1}
-              />
+              <CartesianGrid horizontal={true} vertical={false} stroke="#1e222d" strokeWidth={1} />
               <XAxis
-                dataKey="date"
-                stroke="#363a45"
-                fontSize={10}
-                tickLine={false}
-                axisLine={false}
+                dataKey="date" stroke="#363a45" fontSize={10} tickLine={false} axisLine={false}
                 tickFormatter={(d: string) => {
-                  if (pricePeriod === '1M') return d.slice(8); // day only
-                  if (pricePeriod === '3M') return d.slice(5); // MM-DD
-                  return d.slice(0, 7); // YYYY-MM
+                  if (pricePeriod === '1M') return d.slice(8);
+                  if (pricePeriod === '3M') return d.slice(5);
+                  return d.slice(0, 7);
                 }}
                 minTickGap={40}
               />
-              <YAxis
-                orientation="right"
-                stroke="#363a45"
-                fontSize={10}
-                tickLine={false}
-                axisLine={false}
-                domain={['auto', 'auto']}
-                tickFormatter={(v: number) => v.toFixed(1)}
-              />
+              <YAxis orientation="right" stroke="#363a45" fontSize={10} tickLine={false} axisLine={false} domain={['auto', 'auto']} tickFormatter={(v: number) => v.toFixed(1)} />
               <Tooltip
-                contentStyle={{
-                  backgroundColor: '#1e222d',
-                  border: '1px solid #363a45',
-                  borderRadius: '4px',
-                  padding: '8px 12px',
-                }}
+                contentStyle={{ backgroundColor: '#1e222d', border: '1px solid #363a45', borderRadius: '4px', padding: '8px 12px' }}
                 labelStyle={{ color: '#787b86', fontSize: 11 }}
                 itemStyle={{ color: '#d1d4dc', fontSize: 12 }}
-                formatter={(value: number) => [`KES ${value.toFixed(2)}`, 'Price']}
+                formatter={(value: unknown) => [`KES ${Number(value).toFixed(2)}`, 'Price']}
               />
-              {/* Current price reference line */}
               {currentPrice != null && (
-                <ReferenceLine
-                  y={currentPrice}
-                  stroke={lineColor}
-                  strokeDasharray="2 2"
-                  strokeWidth={0.5}
-                />
+                <ReferenceLine y={currentPrice} stroke={lineColor} strokeDasharray="2 2" strokeWidth={0.5} />
               )}
-              <Line
-                type="monotone"
-                dataKey="price"
-                stroke={lineColor}
-                strokeWidth={1.5}
-                dot={false}
-                activeDot={{ r: 3, fill: lineColor, strokeWidth: 0 }}
-              />
+              <Line type="monotone" dataKey="price" stroke={lineColor} strokeWidth={1.5} dot={false} activeDot={{ r: 3, fill: lineColor, strokeWidth: 0 }} />
             </LineChart>
           </ResponsiveContainer>
         ) : (
@@ -258,7 +336,7 @@ export default function CompanyDetailPage() {
         )}
       </div>
 
-      {/* Valuation Trend Chart — TradingView Style */}
+      {/* Valuation Trend Chart */}
       {trendChartData.length > 0 && (() => {
         const marketPrices = trendChartData.map(d => d.market_price).filter((v): v is number => v != null);
         const ivValues = trendChartData.map(d => d.intrinsic_value).filter((v): v is number => v != null);
@@ -268,7 +346,6 @@ export default function CompanyDetailPage() {
 
         return (
           <div className="bg-[#131722] border border-[#2a2e39] rounded-xl p-5 mb-6">
-            {/* Chart Header */}
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-3">
                 <BarChart3 size={16} className="text-[#26a69a]" />
@@ -279,16 +356,13 @@ export default function CompanyDetailPage() {
                   </span>
                 )}
               </div>
-              {/* Period Tabs */}
               <div className="flex gap-1">
                 {(['3M', '6M', '1Y', 'ALL'] as TimePeriod[]).map((p) => (
                   <button
                     key={p}
                     onClick={() => setTrendPeriod(p)}
                     className={`px-2.5 py-1 text-xs font-medium rounded transition-colors ${
-                      trendPeriod === p
-                        ? 'bg-[#2962FF] text-white'
-                        : 'text-gray-500 hover:text-gray-300 hover:bg-[#1e222d]'
+                      trendPeriod === p ? 'bg-[#2962FF] text-white' : 'text-gray-500 hover:text-gray-300 hover:bg-[#1e222d]'
                     }`}
                   >
                     {p}
@@ -296,7 +370,6 @@ export default function CompanyDetailPage() {
                 ))}
               </div>
             </div>
-
             <ResponsiveContainer width="100%" height={300}>
               <ComposedChart data={trendChartData} margin={{ top: 10, right: 60, bottom: 0, left: 0 }}>
                 <defs>
@@ -305,77 +378,22 @@ export default function CompanyDetailPage() {
                     <stop offset="100%" stopColor="#26a69a" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid
-                  horizontal={true}
-                  vertical={false}
-                  stroke="#1e222d"
-                  strokeWidth={1}
-                />
-                <XAxis
-                  dataKey="date"
-                  stroke="#363a45"
-                  fontSize={10}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(d: string) => d.slice(5)}
-                  minTickGap={40}
-                />
-                <YAxis
-                  orientation="right"
-                  stroke="#363a45"
-                  fontSize={10}
-                  tickLine={false}
-                  axisLine={false}
-                  domain={[minY, maxY]}
-                  tickFormatter={(v: number) => v.toFixed(1)}
-                />
+                <CartesianGrid horizontal={true} vertical={false} stroke="#1e222d" strokeWidth={1} />
+                <XAxis dataKey="date" stroke="#363a45" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(d: string) => d.slice(5)} minTickGap={40} />
+                <YAxis orientation="right" stroke="#363a45" fontSize={10} tickLine={false} axisLine={false} domain={[minY, maxY]} tickFormatter={(v: number) => v.toFixed(1)} />
                 <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#1e222d',
-                    border: '1px solid #363a45',
-                    borderRadius: '4px',
-                    padding: '8px 12px',
-                  }}
+                  contentStyle={{ backgroundColor: '#1e222d', border: '1px solid #363a45', borderRadius: '4px', padding: '8px 12px' }}
                   labelStyle={{ color: '#787b86', fontSize: 11 }}
-                  formatter={(value: number, name: string) => {
+                  formatter={(value: unknown, name: unknown) => {
                     const label = name === 'market_price' ? 'Market Price' : 'Intrinsic Value';
-                    return [value != null ? `KES ${value.toFixed(2)}` : '—', label];
+                    return [value != null ? `KES ${Number(value).toFixed(2)}` : '—', label];
                   }}
                 />
-                {/* IV area fill (subtle buy zone) */}
-                <Area
-                  type="monotone"
-                  dataKey="intrinsic_value"
-                  stroke="none"
-                  fill="url(#buyZoneGradient)"
-                  dot={false}
-                  connectNulls
-                />
-                {/* IV line (dashed) */}
-                <Line
-                  type="monotone"
-                  dataKey="intrinsic_value"
-                  stroke="#26a69a"
-                  strokeWidth={1.5}
-                  strokeDasharray="4 3"
-                  dot={false}
-                  name="intrinsic_value"
-                  connectNulls
-                />
-                {/* Market price line (solid) */}
-                <Line
-                  type="monotone"
-                  dataKey="market_price"
-                  stroke="#f59e0b"
-                  strokeWidth={1.5}
-                  dot={false}
-                  name="market_price"
-                  connectNulls
-                />
+                <Area type="monotone" dataKey="intrinsic_value" stroke="none" fill="url(#buyZoneGradient)" dot={false} connectNulls />
+                <Line type="monotone" dataKey="intrinsic_value" stroke="#26a69a" strokeWidth={1.5} strokeDasharray="4 3" dot={false} name="intrinsic_value" connectNulls />
+                <Line type="monotone" dataKey="market_price" stroke="#f59e0b" strokeWidth={1.5} dot={false} name="market_price" connectNulls />
               </ComposedChart>
             </ResponsiveContainer>
-
-            {/* Legend */}
             <div className="flex items-center gap-5 mt-3 text-[10px] text-gray-500">
               <span className="flex items-center gap-1.5">
                 <span className="w-3 h-[2px] bg-amber-500 inline-block rounded" /> Market Price
@@ -398,44 +416,207 @@ export default function CompanyDetailPage() {
             <Calculator size={18} className="text-purple-400" />
             Valuation
           </h2>
-          <button
-            onClick={handleCompute}
-            disabled={computing}
-            className="flex items-center gap-2 px-3 py-1.5 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
-          >
-            <RefreshCw size={14} className={computing ? 'animate-spin' : ''} />
-            {computing ? 'Computing...' : 'Compute Valuation'}
-          </button>
+          <div className="flex items-center gap-2">
+            {isCustom && (
+              <span className="px-2 py-0.5 text-xs bg-yellow-600/30 text-yellow-400 rounded">Custom</span>
+            )}
+            <button
+              onClick={() => handleCompute(false)}
+              disabled={computing}
+              className="flex items-center gap-2 px-3 py-1.5 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
+            >
+              <RefreshCw size={14} className={computing ? 'animate-spin' : ''} />
+              {computing ? 'Computing...' : 'Compute Valuation'}
+            </button>
+          </div>
         </div>
 
         {valuation ? (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-4 bg-dark-bg rounded-lg">
-              <p className="text-sm text-gray-400 mb-1">Intrinsic Value</p>
-              <p className="text-xl font-bold text-white">
-                KES {valuation.weighted_intrinsic_value?.toFixed(2) ?? '—'}
-              </p>
+          <>
+            {/* Primary metrics */}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
+              <div className="p-3 bg-dark-bg rounded-lg">
+                <p className="text-xs text-gray-400 mb-1">Intrinsic Value</p>
+                <p className="text-lg font-bold text-white">
+                  {fmtKES(valuation.weighted_intrinsic_value)}
+                </p>
+              </div>
+              <div className="p-3 bg-dark-bg rounded-lg">
+                <p className="text-xs text-gray-400 mb-1">Margin of Safety</p>
+                <p className={`text-lg font-bold ${(valuation.margin_of_safety_pct ?? 0) > 0 ? 'text-gain' : 'text-loss'}`}>
+                  {fmtPct(valuation.margin_of_safety_pct)}
+                </p>
+              </div>
+              <div className="p-3 bg-dark-bg rounded-lg">
+                <p className="text-xs text-gray-400 mb-1">Market Price</p>
+                <p className="text-lg font-bold text-white">
+                  {fmtKES(valuation.current_market_price)}
+                </p>
+              </div>
+              <div className="p-3 bg-dark-bg rounded-lg">
+                <p className="text-xs text-gray-400 mb-1">DCF Value</p>
+                <p className={`text-lg font-bold ${valuation.dcf_value ? 'text-blue-400' : 'text-gray-500'}`}>
+                  {valuation.dcf_value ? fmtKES(valuation.dcf_value) : '—'}
+                </p>
+              </div>
+              <div className="p-3 bg-dark-bg rounded-lg">
+                <p className="text-xs text-gray-400 mb-1">EPV Value</p>
+                <p className={`text-lg font-bold ${valuation.epv_value ? 'text-teal-400' : 'text-gray-500'}`}>
+                  {valuation.epv_value ? fmtKES(valuation.epv_value) : '—'}
+                </p>
+              </div>
+              <div className="p-3 bg-dark-bg rounded-lg">
+                <p className="text-xs text-gray-400 mb-1">Book Value</p>
+                <p className={`text-lg font-bold ${valuation.book_value_estimate && valuation.book_value_estimate > 0 ? 'text-amber-400' : 'text-loss'}`}>
+                  {valuation.book_value_estimate ? fmtKES(valuation.book_value_estimate) : '—'}
+                </p>
+              </div>
             </div>
-            <div className="p-4 bg-dark-bg rounded-lg">
-              <p className="text-sm text-gray-400 mb-1">Margin of Safety</p>
-              <p className={`text-xl font-bold ${(valuation.margin_of_safety_pct ?? 0) > 0 ? 'text-gain' : 'text-loss'}`}>
-                {valuation.margin_of_safety_pct != null ? (valuation.margin_of_safety_pct * 100).toFixed(1) : '—'}%
-              </p>
+
+            {/* Assumptions & Stress Test */}
+            <div className="mb-4">
+              <button
+                onClick={() => {
+                  const next = !showAssumptions;
+                  setShowAssumptions(next);
+                  if (next && assumptions && !customDiscountRate) populateFromCurrent();
+                }}
+                className="flex items-center gap-2 text-xs text-gray-400 hover:text-gray-300 transition-colors"
+              >
+                <Info size={12} />
+                {showAssumptions ? 'Hide' : 'Show'} Assumptions & Stress Test
+              </button>
+              {showAssumptions && (
+                <div className="mt-3 p-4 bg-dark-bg rounded-lg text-sm">
+                  {/* Current values (read-only) */}
+                  {assumptions && (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 pb-4 border-b border-dark-border">
+                      <div>
+                        <span className="text-gray-500 text-xs">Current Discount Rate</span>
+                        <p className="text-gray-300">{(assumptions.discount_rate * 100).toFixed(0)}%</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 text-xs">Growth Rate Used</span>
+                        <p className="text-gray-300">
+                          {calcDetails && (calcDetails.dcf as { growth_rate_used?: number })?.growth_rate_used != null
+                            ? ((calcDetails.dcf as { growth_rate_used: number }).growth_rate_used * 100).toFixed(1) + '%'
+                            : '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 text-xs">Historical FCFs</span>
+                        <p className="text-gray-300 text-xs">
+                          {calcDetails && (calcDetails.dcf as { historical_fcfs?: number[] })?.historical_fcfs
+                            ? (calcDetails.dcf as { historical_fcfs: number[] }).historical_fcfs.map(f => fmtNum(f)).join(', ')
+                            : '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 text-xs">Weights Applied</span>
+                        <p className="text-gray-300">
+                          {calcDetails && (calcDetails as { weights_applied?: Record<string, number> }).weights_applied
+                            ? Object.entries((calcDetails as { weights_applied: Record<string, number> }).weights_applied)
+                                .map(([k, v]) => `${k.toUpperCase()} ${(v * 100).toFixed(0)}%`)
+                                .join(', ')
+                            : '—'}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Editable inputs */}
+                  <p className="text-xs text-gray-400 mb-3 font-medium">✏️ Custom Assumptions (edit & recompute to stress-test)</p>
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-3">
+                    <div>
+                      <label className="text-gray-500 text-xs block mb-1">Discount Rate %</label>
+                      <input
+                        type="number" min="1" max="50" step="1"
+                        value={customDiscountRate}
+                        onChange={(e) => setCustomDiscountRate(e.target.value)}
+                        placeholder="e.g. 15"
+                        className="w-full px-2 py-1.5 bg-dark-surface border border-dark-border rounded text-white text-sm focus:border-primary-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-gray-500 text-xs block mb-1">Terminal Growth %</label>
+                      <input
+                        type="number" min="0" max="10" step="0.5"
+                        value={customTerminalGrowth}
+                        onChange={(e) => setCustomTerminalGrowth(e.target.value)}
+                        placeholder="e.g. 3"
+                        className="w-full px-2 py-1.5 bg-dark-surface border border-dark-border rounded text-white text-sm focus:border-primary-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-gray-500 text-xs block mb-1">Projection Years</label>
+                      <input
+                        type="number" min="5" max="20" step="1"
+                        value={customProjectionYears}
+                        onChange={(e) => setCustomProjectionYears(e.target.value)}
+                        placeholder="e.g. 10"
+                        className="w-full px-2 py-1.5 bg-dark-surface border border-dark-border rounded text-white text-sm focus:border-primary-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-gray-500 text-xs block mb-1">DCF Weight %</label>
+                      <input
+                        type="number" min="0" max="100" step="5"
+                        value={customDcfWeight}
+                        onChange={(e) => setCustomDcfWeight(e.target.value)}
+                        placeholder="e.g. 50"
+                        className="w-full px-2 py-1.5 bg-dark-surface border border-dark-border rounded text-white text-sm focus:border-primary-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-gray-500 text-xs block mb-1">EPV Weight %</label>
+                      <input
+                        type="number" min="0" max="100" step="5"
+                        value={customEpvWeight}
+                        onChange={(e) => setCustomEpvWeight(e.target.value)}
+                        placeholder="e.g. 30"
+                        className="w-full px-2 py-1.5 bg-dark-surface border border-dark-border rounded text-white text-sm focus:border-primary-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-gray-500 text-xs block mb-1">BV Weight %</label>
+                      <input
+                        type="number" min="0" max="100" step="5"
+                        value={customBvWeight}
+                        onChange={(e) => setCustomBvWeight(e.target.value)}
+                        placeholder="e.g. 20"
+                        className="w-full px-2 py-1.5 bg-dark-surface border border-dark-border rounded text-white text-sm focus:border-primary-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleCompute(true)}
+                      disabled={computing}
+                      className="flex items-center gap-2 px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
+                    >
+                      <Calculator size={14} />
+                      {computing ? 'Computing...' : 'Recompute with Custom Assumptions'}
+                    </button>
+                    <button
+                      onClick={() => { resetAssumptions(); handleCompute(false); }}
+                      disabled={computing}
+                      className="flex items-center gap-2 px-3 py-1.5 bg-dark-surface border border-dark-border hover:bg-dark-border/50 text-gray-300 text-sm rounded-lg transition-colors"
+                    >
+                      <RotateCcw size={14} />
+                      Reset to Defaults
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="p-4 bg-dark-bg rounded-lg">
-              <p className="text-sm text-gray-400 mb-1">Market Price</p>
-              <p className="text-xl font-bold text-white">
-                {valuation.current_market_price ? `KES ${valuation.current_market_price.toFixed(2)}` : '—'}
-              </p>
-              <p className="text-xs text-gray-500">{valuation.valuation_date}</p>
-            </div>
-          </div>
+          </>
         ) : (
           <p className="text-gray-400 text-center py-4">
             No valuation computed yet. Click "Compute Valuation" to generate one.
           </p>
         )}
 
+        {/* Recommendation */}
         {recommendation && recommendation.reason && (
           <div className="mt-4 p-4 bg-dark-bg rounded-lg">
             <p className="text-sm text-gray-400 mb-2">Analysis:</p>
@@ -458,7 +639,65 @@ export default function CompanyDetailPage() {
         )}
       </div>
 
-      {/* Financial Statements */}
+      {/* Key Ratios */}
+      {latestFinancial && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+          <div className="bg-dark-surface border border-dark-border rounded-xl p-4">
+            <p className="text-xs text-gray-400 mb-1">P/E Ratio</p>
+            <p className="text-xl font-bold text-white">{pe != null ? pe.toFixed(1) : '—'}</p>
+            <p className="text-xs text-gray-500">Price / EPS</p>
+          </div>
+          <div className="bg-dark-surface border border-dark-border rounded-xl p-4">
+            <p className="text-xs text-gray-400 mb-1">P/B Ratio</p>
+            <p className="text-xl font-bold text-white">{pb != null ? pb.toFixed(2) : '—'}</p>
+            <p className="text-xs text-gray-500">Price / Book Value</p>
+          </div>
+          <div className="bg-dark-surface border border-dark-border rounded-xl p-4">
+            <p className="text-xs text-gray-400 mb-1">Debt / Equity</p>
+            <p className={`text-xl font-bold ${latestFinancial.debt_to_equity && latestFinancial.debt_to_equity > 2 ? 'text-loss' : 'text-white'}`}>
+              {latestFinancial.debt_to_equity != null ? latestFinancial.debt_to_equity.toFixed(2) : '—'}
+            </p>
+            <p className="text-xs text-gray-500">Total Debt / Equity</p>
+          </div>
+          <div className="bg-dark-surface border border-dark-border rounded-xl p-4">
+            <p className="text-xs text-gray-400 mb-1">Dividend Yield</p>
+            <p className="text-xl font-bold text-white">{divYield != null ? (divYield * 100).toFixed(1) + '%' : '—'}</p>
+            <p className="text-xs text-gray-500">DPS / Price</p>
+          </div>
+        </div>
+      )}
+
+      {/* Financial Trend Chart */}
+      {financialChartData.length > 1 && (
+        <div className="bg-dark-surface border border-dark-border rounded-xl p-6 mb-6">
+          <h2 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
+            <TrendingUp size={18} className="text-blue-400" />
+            Financial Trend (KES Billions)
+          </h2>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={financialChartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a2e39" />
+              <XAxis dataKey="year" stroke="#787b86" fontSize={11} />
+              <YAxis stroke="#787b86" fontSize={10} tickFormatter={(v: number) => v.toFixed(0)} />
+              <Tooltip
+                contentStyle={{ backgroundColor: '#1e222d', border: '1px solid #363a45', borderRadius: '4px' }}
+                labelStyle={{ color: '#787b86' }}
+                formatter={(value: unknown, name: unknown) => [`KES ${Number(value).toFixed(1)}B`, name === 'revenue' ? 'Revenue' : name === 'net_income' ? 'Net Income' : 'FCF']}
+              />
+              <Bar dataKey="revenue" fill="#3b82f6" radius={[2, 2, 0, 0]} name="revenue" />
+              <Bar dataKey="net_income" fill="#8b5cf6" radius={[2, 2, 0, 0]} name="net_income" />
+              <Bar dataKey="fcf" fill="#10b981" radius={[2, 2, 0, 0]} name="fcf" />
+            </BarChart>
+          </ResponsiveContainer>
+          <div className="flex items-center gap-5 mt-2 text-[10px] text-gray-500">
+            <span className="flex items-center gap-1.5"><span className="w-3 h-2.5 bg-blue-500 inline-block rounded-sm" /> Revenue</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-2.5 bg-purple-500 inline-block rounded-sm" /> Net Income</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-2.5 bg-emerald-500 inline-block rounded-sm" /> Free Cash Flow</span>
+          </div>
+        </div>
+      )}
+
+      {/* Financial Statements — Expanded */}
       <div className="bg-dark-surface border border-dark-border rounded-xl p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
@@ -477,39 +716,77 @@ export default function CompanyDetailPage() {
           <p className="text-gray-400 text-center py-4">No financial statements recorded.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full text-sm">
               <thead>
-                <tr className="text-left text-sm text-gray-400 border-b border-dark-border">
-                  <th className="pb-3 font-medium">Year</th>
-                  <th className="pb-3 font-medium">Revenue (KES)</th>
-                  <th className="pb-3 font-medium">Net Income (KES)</th>
-                  <th className="pb-3 font-medium text-right">ROE</th>
+                <tr className="text-left text-xs text-gray-400 border-b border-dark-border">
+                  <th className="pb-3 font-medium sticky left-0 bg-dark-surface">Year</th>
+                  <th className="pb-3 font-medium px-2">Revenue</th>
+                  <th className="pb-3 font-medium px-2">Net Income</th>
+                  <th className="pb-3 font-medium px-2">EPS</th>
+                  <th className="pb-3 font-medium px-2">FCF</th>
+                  <th className="pb-3 font-medium px-2">OCF</th>
+                  <th className="pb-3 font-medium px-2">CapEx</th>
+                  <th className="pb-3 font-medium px-2">Equity</th>
+                  <th className="pb-3 font-medium px-2">BVPS</th>
+                  <th className="pb-3 font-medium px-2">D/E</th>
+                  <th className="pb-3 font-medium px-2">ROE</th>
+                  <th className="pb-3 font-medium px-2">DPS</th>
+                  <th className="pb-3 font-medium px-2">Source</th>
+                  <th className="pb-3 font-medium px-2"></th>
                 </tr>
               </thead>
               <tbody>
-                {financials.map((fs) => (
-                  <tr key={fs.id} className="border-b border-dark-border/50">
-                    <td className="py-3">
-                      <span className="px-2 py-1 bg-dark-border/50 rounded text-xs text-gray-300">
-                        {fs.fiscal_year} ({fs.period_type})
-                      </span>
-                    </td>
-                    <td className="py-3 text-gray-300">
-                      {fs.revenue ? (fs.revenue / 1e9).toFixed(1) + 'B' : '—'}
-                    </td>
-                    <td className="py-3 text-gray-300">
-                      {fs.net_income ? (fs.net_income / 1e9).toFixed(1) + 'B' : '—'}
-                    </td>
-                    <td className="py-3 text-right">
-                      <Link
-                        to={`/companies/${companyId}/financials/${fs.id}/edit`}
-                        className="text-primary-400 hover:text-primary-300 text-sm"
-                      >
-                        {fs.return_on_equity != null ? (fs.return_on_equity * 100).toFixed(1) + '%' : '—'}
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
+                {[...financials].sort((a, b) => b.fiscal_year - a.fiscal_year).map((fs) => {
+                  const source = getDataSource(fs.notes);
+                  return (
+                    <tr key={fs.id} className="border-b border-dark-border/50 hover:bg-dark-border/10">
+                      <td className="py-2.5 sticky left-0 bg-dark-surface">
+                        <span className="px-2 py-0.5 bg-dark-border/50 rounded text-xs text-gray-300">
+                          {fs.fiscal_year}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-2 text-gray-300">{fmtNum(fs.revenue)}</td>
+                      <td className={`py-2.5 px-2 ${fs.net_income && fs.net_income < 0 ? 'text-loss' : 'text-gray-300'}`}>
+                        {fmtNum(fs.net_income)}
+                      </td>
+                      <td className="py-2.5 px-2 text-gray-300">
+                        {fs.earnings_per_share != null ? fs.earnings_per_share.toFixed(2) : '—'}
+                      </td>
+                      <td className={`py-2.5 px-2 ${fs.free_cash_flow && fs.free_cash_flow < 0 ? 'text-loss' : 'text-gain'}`}>
+                        {fmtNum(fs.free_cash_flow)}
+                      </td>
+                      <td className="py-2.5 px-2 text-gray-300">{fmtNum(fs.operating_cash_flow)}</td>
+                      <td className="py-2.5 px-2 text-gray-300">{fmtNum(fs.capital_expenditures)}</td>
+                      <td className={`py-2.5 px-2 ${fs.total_equity && fs.total_equity < 0 ? 'text-loss' : 'text-gray-300'}`}>
+                        {fmtNum(fs.total_equity)}
+                      </td>
+                      <td className="py-2.5 px-2 text-gray-300">
+                        {fs.book_value_per_share != null ? fs.book_value_per_share.toFixed(2) : '—'}
+                      </td>
+                      <td className={`py-2.5 px-2 ${fs.debt_to_equity && (fs.debt_to_equity > 2 || fs.debt_to_equity < 0) ? 'text-loss' : 'text-gray-300'}`}>
+                        {fs.debt_to_equity != null ? fs.debt_to_equity.toFixed(2) : '—'}
+                      </td>
+                      <td className="py-2.5 px-2 text-gray-300">{fmtPct(fs.return_on_equity)}</td>
+                      <td className="py-2.5 px-2 text-gray-300">
+                        {fs.dividends_per_share != null ? fs.dividends_per_share.toFixed(2) : '—'}
+                      </td>
+                      <td className="py-2.5 px-2">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] text-white ${source.color}`}>
+                          {source.label}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-2">
+                        <Link
+                          to={`/companies/${companyId}/financials/${fs.id}/edit`}
+                          className="text-gray-400 hover:text-primary-400 transition-colors"
+                          title="Edit"
+                        >
+                          <Edit3 size={14} />
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
