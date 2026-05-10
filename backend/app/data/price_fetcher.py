@@ -1,6 +1,7 @@
 """Price fetcher orchestrator - coordinates data sources with fallback logic.
 
-Tries scraper first (more reliable for NSE), falls back to yfinance.
+Tries Marketscreener first when a verified graphics URL exists, then falls back
+to the current scraper and yfinance.
 Implements idempotent upsert to prevent duplicate price records.
 """
 
@@ -14,7 +15,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.models.company import Company
 from app.models.price_history import PriceHistory
-from app.data import nse_scraper, yfinance_adapter, kenyanstocks_adapter, marketscreener_adapter
+from app.data import nse_scraper, yfinance_adapter, marketscreener_adapter
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -124,9 +125,8 @@ def backfill_company_prices(
     
     Strategy (priority order):
     1. Try Marketscreener if a verified graphics URL is stored
-    2. Try kenyanstocks.com (~248 days OHLCV)
-    3. Try afx scraper for company history page (~10 days)
-    4. Try yfinance for full history
+    2. Try afx scraper for company history page (~10 days)
+    3. Try yfinance for full history
     
     Returns dict with stats.
     """
@@ -155,29 +155,7 @@ def backfill_company_prices(
                 f"Marketscreener backfill failed for {company.ticker_symbol}: {e}"
             )
 
-    # Priority 1: kenyanstocks.com (best — ~248 days of OHLCV)
-    if settings.kenyanstocks_enabled:
-        try:
-            prices = kenyanstocks_adapter.fetch_history(company.ticker_symbol)
-            if prices:
-                stats["source"] = "kenyanstocks"
-                for price_data in prices:
-                    if price_data.get("close_price"):
-                        upsert_price(db, company.id, price_data)
-                        stats["upserted"] += 1
-                    stats["total"] += 1
-                db.commit()
-                logger.info(
-                    f"Backfilled {company.ticker_symbol} via kenyanstocks: "
-                    f"{stats['upserted']} prices"
-                )
-                return stats
-        except Exception as e:
-            logger.warning(
-                f"kenyanstocks backfill failed for {company.ticker_symbol}: {e}"
-            )
-
-    # Priority 2: afx scraper (~10 days)
+    # Priority 1: afx scraper (~10 days)
     if settings.scraper_enabled:
         try:
             prices = nse_scraper.scrape_company_history(company.ticker_symbol)
@@ -197,7 +175,7 @@ def backfill_company_prices(
         except Exception as e:
             logger.warning(f"Scraper backfill failed for {company.ticker_symbol}: {e}")
 
-    # Priority 3: yfinance
+    # Priority 2: yfinance
     if settings.yfinance_enabled and company.yfinance_ticker:
         try:
             time.sleep(delay)  # Rate limiting

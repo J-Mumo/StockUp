@@ -3,20 +3,34 @@ import { useParams, Link } from 'react-router-dom';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, ReferenceLine, ComposedChart, BarChart, Bar,
 } from 'recharts';
-import { ArrowLeft, TrendingUp, Calculator, FileText, RefreshCw, BarChart3, ExternalLink, Edit3, Info, RotateCcw, Briefcase } from 'lucide-react';
+import { ArrowLeft, TrendingUp, Calculator, FileText, RefreshCw, BarChart3, ExternalLink, Edit3, Info, RotateCcw, Briefcase, MessageSquare, Trash2, Save, X, Plus } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { stocksApi, analysisApi, portfolioApi } from '../lib/services';
-import type { CompanyDetail, PriceHistory, FinancialStatement, IntrinsicValue, Recommendation, ValuationTrendPoint, Holding, Portfolio } from '../types';
+import { stocksApi, analysisApi, portfolioApi, notesApi } from '../lib/services';
+import type { CompanyDetail, PriceHistory, FinancialStatement, IntrinsicValue, Recommendation, ValuationTrendPoint, Holding, Portfolio, CompanyNote } from '../types';
 import { PageLoader } from '../components/ui/LoadingSpinner';
 
-type TimePeriod = '1M' | '3M' | '6M' | '1Y' | 'ALL';
+type TimePeriod = '1D' | '5D' | '1M' | '6M' | 'YTD' | '1Y' | '5Y' | 'ALL';
 
 const PERIOD_DAYS: Record<TimePeriod, number> = {
+  '1D': 1,
+  '5D': 5,
   '1M': 30,
-  '3M': 90,
   '6M': 180,
+  'YTD': -1, // special: computed from Jan 1
   '1Y': 365,
+  '5Y': 1825,
   'ALL': 9999,
+};
+
+const PERIOD_LABELS: Record<TimePeriod, string> = {
+  '1D': '1 day',
+  '5D': '5 days',
+  '1M': '1 month',
+  '6M': '6 months',
+  'YTD': 'Year to date',
+  '1Y': '1 year',
+  '5Y': '5 years',
+  'ALL': 'All time',
 };
 
 // Format large numbers
@@ -61,7 +75,7 @@ export default function CompanyDetailPage() {
   const [trendData, setTrendData] = useState<ValuationTrendPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [computing, setComputing] = useState(false);
-  const [pricePeriod, setPricePeriod] = useState<TimePeriod>('3M');
+  const [pricePeriod, setPricePeriod] = useState<TimePeriod>('1Y');
   const [trendPeriod, setTrendPeriod] = useState<TimePeriod>('1Y');
   const [showAssumptions, setShowAssumptions] = useState(false);
 
@@ -74,6 +88,13 @@ export default function CompanyDetailPage() {
   const [customBvWeight, setCustomBvWeight] = useState<string>('');
   const [isCustom, setIsCustom] = useState(false);
   const [position, setPosition] = useState<Holding | null>(null);
+  const [notes, setNotes] = useState<CompanyNote[]>([]);
+  const [newNoteText, setNewNoteText] = useState('');
+  const [newNoteTag, setNewNoteTag] = useState('');
+  const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
+  const [editNoteText, setEditNoteText] = useState('');
+  const [editNoteTag, setEditNoteTag] = useState('');
+  const [showNotes, setShowNotes] = useState(true);
 
   useEffect(() => {
     if (!companyId) return;
@@ -118,6 +139,44 @@ export default function CompanyDetailPage() {
       })
       .catch(() => setPosition(null));
   }, [companyId]);
+
+  // Fetch notes
+  useEffect(() => {
+    if (!companyId) return;
+    notesApi.list(companyId).then(res => setNotes(res.data)).catch(() => {});
+  }, [companyId]);
+
+  const loadNotes = () => {
+    notesApi.list(companyId).then(res => setNotes(res.data)).catch(() => {});
+  };
+
+  const handleCreateNote = async () => {
+    if (!newNoteText.trim()) return;
+    try {
+      await notesApi.create(companyId, { note_text: newNoteText.trim(), tag: newNoteTag || undefined });
+      setNewNoteText('');
+      setNewNoteTag('');
+      loadNotes();
+      toast.success('Note saved');
+    } catch { toast.error('Failed to save note'); }
+  };
+
+  const handleUpdateNote = async (noteId: number) => {
+    try {
+      await notesApi.update(companyId, noteId, { note_text: editNoteText, tag: editNoteTag || undefined });
+      setEditingNoteId(null);
+      loadNotes();
+      toast.success('Note updated');
+    } catch { toast.error('Failed to update note'); }
+  };
+
+  const handleDeleteNote = async (noteId: number) => {
+    try {
+      await notesApi.delete(companyId, noteId);
+      loadNotes();
+      toast.success('Note deleted');
+    } catch { toast.error('Failed to delete note'); }
+  };
 
   const handleCompute = async (useCustom = false) => {
     setComputing(true);
@@ -179,21 +238,51 @@ export default function CompanyDetailPage() {
     [prices]
   );
 
+  // Helper: slice prices by period
+  const slicePricesByPeriod = (period: TimePeriod) => {
+    if (sortedPrices.length === 0) return [];
+    if (period === 'YTD') {
+      const yearStart = new Date().getFullYear() + '-01-01';
+      return sortedPrices.filter(p => p.price_date >= yearStart);
+    }
+    const days = PERIOD_DAYS[period];
+    return days >= sortedPrices.length ? sortedPrices : sortedPrices.slice(-days);
+  };
+
   // Price chart data filtered by period
   const priceChartData = useMemo(() => {
-    const days = PERIOD_DAYS[pricePeriod];
-    const sliced = days >= sortedPrices.length ? sortedPrices : sortedPrices.slice(-days);
+    const sliced = slicePricesByPeriod(pricePeriod);
     return sliced.map((p) => ({
       date: p.price_date,
       price: p.close_price,
     }));
   }, [sortedPrices, pricePeriod]);
 
+  // Performance metrics for each period
+  const performanceMetrics = useMemo(() => {
+    if (sortedPrices.length === 0) return [];
+    const latestPrice = sortedPrices[sortedPrices.length - 1].close_price;
+    const periods: TimePeriod[] = ['1D', '5D', '1M', '6M', 'YTD', '1Y', '5Y', 'ALL'];
+    return periods.map(period => {
+      const sliced = slicePricesByPeriod(period);
+      if (sliced.length === 0) return { period, label: PERIOD_LABELS[period], pct: null };
+      const startPrice = sliced[0].close_price;
+      const pct = startPrice > 0 ? ((latestPrice - startPrice) / startPrice) * 100 : null;
+      return { period, label: PERIOD_LABELS[period], pct };
+    });
+  }, [sortedPrices]);
+
   // Valuation trend data filtered by period
   const trendChartData = useMemo(() => {
     if (trendData.length === 0) return [];
-    const days = PERIOD_DAYS[trendPeriod];
-    const sliced = days >= trendData.length ? trendData : trendData.slice(-days);
+    let sliced: typeof trendData;
+    if (trendPeriod === 'YTD') {
+      const yearStart = new Date().getFullYear() + '-01-01';
+      sliced = trendData.filter(d => d.date >= yearStart);
+    } else {
+      const days = PERIOD_DAYS[trendPeriod];
+      sliced = days >= trendData.length ? trendData : trendData.slice(-days);
+    }
     const marketPrices = sliced.map(d => d.market_price).filter((v): v is number => v != null);
     const maxMarket = Math.max(...marketPrices, 1);
     const ivCap = maxMarket * 3;
@@ -310,22 +399,34 @@ export default function CompanyDetailPage() {
               </div>
             )}
           </div>
-          <div className="flex gap-1">
-            {(['1M', '3M', '6M', '1Y', 'ALL'] as TimePeriod[]).map((p) => (
+        </div>
+
+        {/* Performance indicators */}
+        {performanceMetrics.length > 0 && (
+          <div className="flex gap-1.5 mb-3">
+            {performanceMetrics.map(({ period, label, pct }) => (
               <button
-                key={p}
-                onClick={() => setPricePeriod(p)}
-                className={`px-2.5 py-1 text-xs font-medium rounded transition-colors ${
-                  pricePeriod === p
-                    ? 'bg-[#2962FF] text-white'
-                    : 'text-gray-500 hover:text-gray-300 hover:bg-[#1e222d]'
+                key={period}
+                onClick={() => setPricePeriod(period)}
+                className={`flex-1 flex flex-col items-center justify-center py-2.5 rounded-lg transition-colors whitespace-nowrap ${
+                  pricePeriod === period
+                    ? 'bg-[#2962FF]/20 border border-[#2962FF]/50'
+                    : 'hover:bg-[#1e222d] border border-[#2a2e39]'
                 }`}
               >
-                {p}
+                <span className="text-gray-400 text-sm mb-0.5">{label}</span>
+                <span className={`text-base font-semibold ${
+                  pct == null ? 'text-gray-600'
+                  : pct > 0 ? 'text-[#26a69a]'
+                  : pct < 0 ? 'text-[#ef5350]'
+                  : 'text-gray-400'
+                }`}>
+                  {pct != null ? `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%` : '—'}
+                </span>
               </button>
             ))}
           </div>
-        </div>
+        )}
 
         {priceChartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={340}>
@@ -334,8 +435,8 @@ export default function CompanyDetailPage() {
               <XAxis
                 dataKey="date" stroke="#363a45" fontSize={10} tickLine={false} axisLine={false}
                 tickFormatter={(d: string) => {
+                  if (pricePeriod === '1D' || pricePeriod === '5D') return d.slice(5);
                   if (pricePeriod === '1M') return d.slice(8);
-                  if (pricePeriod === '3M') return d.slice(5);
                   return d.slice(0, 7);
                 }}
                 minTickGap={40}
@@ -379,7 +480,7 @@ export default function CompanyDetailPage() {
                 )}
               </div>
               <div className="flex gap-1">
-                {(['3M', '6M', '1Y', 'ALL'] as TimePeriod[]).map((p) => (
+                {(['6M', '1Y', '5Y', 'ALL'] as TimePeriod[]).map((p) => (
                   <button
                     key={p}
                     onClick={() => setTrendPeriod(p)}
@@ -938,6 +1039,151 @@ export default function CompanyDetailPage() {
           </div>
         </div>
       )}
+
+      {/* Notes Section */}
+      <div className="bg-dark-surface border border-dark-border rounded-xl p-6 mb-6">
+        <button
+          onClick={() => setShowNotes(!showNotes)}
+          className="flex items-center gap-2 w-full text-left"
+        >
+          <MessageSquare size={18} className="text-primary-400" />
+          <h3 className="text-lg font-semibold flex-1">Notes ({notes.length})</h3>
+          <span className="text-gray-500 text-sm">{showNotes ? '▾' : '▸'}</span>
+        </button>
+
+        {showNotes && (
+          <div className="mt-4 space-y-4">
+            {/* Add new note */}
+            <div className="border border-dark-border rounded-lg p-3 space-y-2">
+              <textarea
+                value={newNoteText}
+                onChange={(e) => setNewNoteText(e.target.value)}
+                placeholder="Add a note — buy thesis, sell reasoning, observations..."
+                className="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-sm text-white placeholder-gray-500 resize-none focus:outline-none focus:border-primary-500"
+                rows={3}
+              />
+              <div className="flex items-center gap-2">
+                <select
+                  value={newNoteTag}
+                  onChange={(e) => setNewNoteTag(e.target.value)}
+                  className="bg-dark-bg border border-dark-border rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-primary-500"
+                >
+                  <option value="">No tag</option>
+                  <option value="buy_thesis">Buy Thesis</option>
+                  <option value="sell_thesis">Sell Thesis</option>
+                  <option value="observation">Observation</option>
+                  <option value="risk">Risk</option>
+                  <option value="catalyst">Catalyst</option>
+                </select>
+                <button
+                  onClick={handleCreateNote}
+                  disabled={!newNoteText.trim()}
+                  className="ml-auto flex items-center gap-1.5 bg-primary-600 hover:bg-primary-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm px-3 py-1.5 rounded transition-colors"
+                >
+                  <Plus size={14} /> Add Note
+                </button>
+              </div>
+            </div>
+
+            {/* Existing notes */}
+            {notes.length === 0 ? (
+              <p className="text-gray-500 text-sm text-center py-4">No notes yet</p>
+            ) : (
+              <div className="space-y-2">
+                {notes.map((note) => {
+                  const tagColors: Record<string, string> = {
+                    buy_thesis: 'bg-green-600/20 text-green-400',
+                    sell_thesis: 'bg-red-600/20 text-red-400',
+                    observation: 'bg-blue-600/20 text-blue-400',
+                    risk: 'bg-orange-600/20 text-orange-400',
+                    catalyst: 'bg-purple-600/20 text-purple-400',
+                  };
+                  const tagLabel: Record<string, string> = {
+                    buy_thesis: 'Buy Thesis',
+                    sell_thesis: 'Sell Thesis',
+                    observation: 'Observation',
+                    risk: 'Risk',
+                    catalyst: 'Catalyst',
+                  };
+
+                  if (editingNoteId === note.id) {
+                    return (
+                      <div key={note.id} className="border border-primary-500/50 rounded-lg p-3 space-y-2">
+                        <textarea
+                          value={editNoteText}
+                          onChange={(e) => setEditNoteText(e.target.value)}
+                          className="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-sm text-white resize-none focus:outline-none focus:border-primary-500"
+                          rows={3}
+                        />
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={editNoteTag}
+                            onChange={(e) => setEditNoteTag(e.target.value)}
+                            className="bg-dark-bg border border-dark-border rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-primary-500"
+                          >
+                            <option value="">No tag</option>
+                            <option value="buy_thesis">Buy Thesis</option>
+                            <option value="sell_thesis">Sell Thesis</option>
+                            <option value="observation">Observation</option>
+                            <option value="risk">Risk</option>
+                            <option value="catalyst">Catalyst</option>
+                          </select>
+                          <button
+                            onClick={() => handleUpdateNote(note.id)}
+                            className="ml-auto flex items-center gap-1 text-green-400 hover:text-green-300 text-sm"
+                          >
+                            <Save size={14} /> Save
+                          </button>
+                          <button
+                            onClick={() => setEditingNoteId(null)}
+                            className="flex items-center gap-1 text-gray-400 hover:text-gray-300 text-sm"
+                          >
+                            <X size={14} /> Cancel
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div key={note.id} className="border border-dark-border rounded-lg p-3 group">
+                      <div className="flex items-start gap-2">
+                        <div className="flex-1 min-w-0">
+                          {note.tag && (
+                            <span className={`inline-block text-[10px] font-medium px-1.5 py-0.5 rounded mb-1 ${tagColors[note.tag] || 'bg-gray-600/20 text-gray-400'}`}>
+                              {tagLabel[note.tag] || note.tag}
+                            </span>
+                          )}
+                          <p className="text-sm text-gray-200 whitespace-pre-wrap">{note.note_text}</p>
+                          <p className="text-[10px] text-gray-600 mt-1">
+                            {new Date(note.updated_at).toLocaleDateString('en-KE', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                        </div>
+                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => { setEditingNoteId(note.id); setEditNoteText(note.note_text); setEditNoteTag(note.tag || ''); }}
+                            className="text-gray-500 hover:text-primary-400 p-1"
+                            title="Edit"
+                          >
+                            <Edit3 size={13} />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteNote(note.id)}
+                            className="text-gray-500 hover:text-red-400 p-1"
+                            title="Delete"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

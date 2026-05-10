@@ -10,14 +10,14 @@ import { PageLoader } from '../components/ui/LoadingSpinner';
 interface FinancialFormData {
   statement_type: 'income' | 'balance_sheet' | 'cash_flow';
   period_type: 'annual' | 'quarterly';
-  period_end: string;
+  report_date: string;
   revenue: string;
   net_income: string;
   total_assets: string;
   total_liabilities: string;
   total_equity: string;
   operating_cash_flow: string;
-  capital_expenditure: string;
+  capital_expenditures: string;
   free_cash_flow: string;
   earnings_per_share: string;
   dividends_per_share: string;
@@ -44,11 +44,25 @@ const balanceFields = [
 
 const cashFlowFields = [
   { name: 'operating_cash_flow', label: 'Operating Cash Flow' },
-  { name: 'capital_expenditure', label: 'Capital Expenditure' },
+  { name: 'capital_expenditures', label: 'Capital Expenditures' },
   { name: 'free_cash_flow', label: 'Free Cash Flow' },
   { name: 'investing_cash_flow', label: 'Investing Cash Flow' },
   { name: 'financing_cash_flow', label: 'Financing Cash Flow' },
 ];
+
+function inferStatementType(statement: FinancialStatement): FinancialFormData['statement_type'] {
+  const hasCashFlow = statement.operating_cash_flow !== null || statement.capital_expenditures !== null || statement.free_cash_flow !== null;
+  if (hasCashFlow) return 'cash_flow';
+
+  const hasBalanceSheet =
+    statement.total_assets !== null ||
+    statement.total_liabilities !== null ||
+    statement.total_equity !== null ||
+    statement.shareholders_equity !== null;
+  if (hasBalanceSheet) return 'balance_sheet';
+
+  return 'income';
+}
 
 export default function FinancialEntryPage() {
   const { id, financialId } = useParams<{ id: string; financialId?: string }>();
@@ -64,7 +78,7 @@ export default function FinancialEntryPage() {
     defaultValues: {
       statement_type: 'income',
       period_type: 'annual',
-      period_end: new Date().toISOString().split('T')[0],
+      report_date: new Date().toISOString().split('T')[0],
     },
   });
 
@@ -77,13 +91,27 @@ export default function FinancialEntryPage() {
           const found = res.data.find((f) => f.id === Number(financialId));
           if (found) {
             setExistingData(found);
-            setValue('statement_type', found.statement_type);
-            setValue('period_type', found.period_type);
-            setValue('period_end', found.period_end);
-            // Populate data fields
-            Object.entries(found.data).forEach(([key, val]) => {
-              if (val !== null) {
-                setValue(key as keyof FinancialFormData, String(val));
+            setValue('statement_type', inferStatementType(found));
+            setValue('period_type', found.period_type as 'annual' | 'quarterly');
+            setValue('report_date', found.report_date ? found.report_date.slice(0, 10) : new Date().toISOString().split('T')[0]);
+
+            const formKeys: Array<keyof FinancialFormData> = [
+              'revenue',
+              'net_income',
+              'total_assets',
+              'total_liabilities',
+              'total_equity',
+              'operating_cash_flow',
+              'capital_expenditures',
+              'free_cash_flow',
+              'earnings_per_share',
+              'dividends_per_share',
+            ];
+
+            formKeys.forEach((key) => {
+              const value = found[key as keyof FinancialStatement];
+              if (value !== null && value !== undefined) {
+                setValue(key, String(value));
               }
             });
           }
@@ -105,25 +133,23 @@ export default function FinancialEntryPage() {
   const onSubmit = async (formData: FinancialFormData) => {
     setSubmitting(true);
     const fields = getFields();
-    const data: Record<string, number | null> = {};
+    const payload: Record<string, number | string | null> = {
+      fiscal_year: Number(formData.report_date.slice(0, 4)),
+      period_type: formData.period_type,
+      report_date: formData.report_date,
+    };
+
     fields.forEach((f) => {
       const val = (formData as unknown as Record<string, string>)[f.name];
-      data[f.name] = val ? Number(val) : null;
+      payload[f.name] = val ? Number(val) : null;
     });
-
-    const payload = {
-      statement_type: formData.statement_type,
-      period_type: formData.period_type,
-      period_end: formData.period_end,
-      data,
-    };
 
     try {
       if (isEdit && financialId) {
-        await stocksApi.updateFinancial(companyId, Number(financialId), payload);
+        await stocksApi.updateFinancial(companyId, Number(financialId), payload as Partial<FinancialStatement>);
         toast.success('Financial statement updated');
       } else {
-        await stocksApi.createFinancial(companyId, payload);
+        await stocksApi.createFinancial(companyId, payload as Partial<FinancialStatement>);
         toast.success('Financial statement created');
       }
       navigate(`/companies/${companyId}`);
@@ -176,11 +202,11 @@ export default function FinancialEntryPage() {
             <label className="block text-sm font-medium text-gray-300 mb-1">Period End Date</label>
             <input
               type="date"
-              {...register('period_end', { required: 'Required' })}
+              {...register('report_date', { required: 'Required' })}
               className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
-            {errors.period_end && (
-              <p className="text-red-400 text-sm mt-1">{errors.period_end.message}</p>
+            {errors.report_date && (
+              <p className="text-red-400 text-sm mt-1">{errors.report_date.message}</p>
             )}
           </div>
         </div>

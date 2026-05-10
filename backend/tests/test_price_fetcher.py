@@ -244,7 +244,6 @@ class TestBackfillCompanyPrices:
         ]
 
         with patch("app.data.price_fetcher.settings") as mock_settings:
-            mock_settings.kenyanstocks_enabled = False
             mock_settings.scraper_enabled = True
             mock_settings.yfinance_enabled = False
 
@@ -295,7 +294,6 @@ class TestBackfillCompanyPrices:
 
         with patch("app.data.price_fetcher.settings") as mock_settings:
             mock_settings.marketscreener_enabled = True
-            mock_settings.kenyanstocks_enabled = False
             mock_settings.scraper_enabled = False
             mock_settings.yfinance_enabled = False
 
@@ -325,7 +323,6 @@ class TestBackfillCompanyPrices:
         ]
 
         with patch("app.data.price_fetcher.settings") as mock_settings:
-            mock_settings.kenyanstocks_enabled = False
             mock_settings.scraper_enabled = True
             mock_settings.yfinance_enabled = True
 
@@ -344,7 +341,6 @@ class TestBackfillCompanyPrices:
         mock_yf.fetch_history.return_value = []
 
         with patch("app.data.price_fetcher.settings") as mock_settings:
-            mock_settings.kenyanstocks_enabled = False
             mock_settings.scraper_enabled = True
             mock_settings.yfinance_enabled = True
 
@@ -357,9 +353,10 @@ class TestBackfillCompanyPrices:
 class TestBackfillAllPrices:
     """Test bulk backfill across all companies."""
 
+    @patch("app.data.price_fetcher.marketscreener_adapter")
     @patch("app.data.price_fetcher.nse_scraper")
     def test_backfill_all_iterates_companies(
-        self, mock_scraper, db: Session, company: Company, company2: Company
+        self, mock_scraper, mock_marketscreener, db: Session, company: Company, company2: Company
     ):
         """Should iterate through all active companies."""
         mock_scraper.scrape_company_history.return_value = [
@@ -371,9 +368,31 @@ class TestBackfillAllPrices:
                 "source": "scraper",
             },
         ]
+        mock_marketscreener.fetch_history_sync.return_value = [
+            {
+                "date": "2026-04-25",
+                "open": 42.0,
+                "high": 42.0,
+                "low": 42.0,
+                "close": 42.0,
+                "volume": 300_000,
+            }
+        ]
+        mock_marketscreener.candles_to_price_rows.side_effect = lambda candles: [
+            {
+                "price_date": date.fromisoformat(candle["date"]),
+                "open_price": candle["open"],
+                "high_price": candle["high"],
+                "low_price": candle["low"],
+                "close_price": candle["close"],
+                "volume": candle["volume"],
+                "source": "marketscreener",
+            }
+            for candle in candles
+        ]
 
         with patch("app.data.price_fetcher.settings") as mock_settings:
-            mock_settings.kenyanstocks_enabled = False
+            mock_settings.marketscreener_enabled = True
             mock_settings.scraper_enabled = True
             mock_settings.yfinance_enabled = False
 

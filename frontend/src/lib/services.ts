@@ -19,6 +19,7 @@ import type {
   DashboardSummary,
   AnalysisSnapshot,
   ValuationTrendPoint,
+  CompanyNote,
 } from '../types';
 
 // Auth
@@ -136,4 +137,16 @@ export const watchlistsApi = {
 // Dashboard
 export const dashboardApi = {
   getSummary: () => api.get<DashboardSummary>('/dashboard'),
+};
+
+// Company Notes
+export const notesApi = {
+  list: (companyId: number) =>
+    api.get<CompanyNote[]>(`/stocks/companies/${companyId}/notes`),
+  create: (companyId: number, data: { note_text: string; tag?: string }) =>
+    api.post<CompanyNote>(`/stocks/companies/${companyId}/notes`, data),
+  update: (companyId: number, noteId: number, data: { note_text?: string; tag?: string }) =>
+    api.put<CompanyNote>(`/stocks/companies/${companyId}/notes/${noteId}`, data),
+  delete: (companyId: number, noteId: number) =>
+    api.delete(`/stocks/companies/${companyId}/notes/${noteId}`),
 };

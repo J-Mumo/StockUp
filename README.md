@@ -23,7 +23,7 @@ StockUp helps you track NSE (Nairobi Securities Exchange) stock prices, calculat
 | Database | PostgreSQL 16 |
 | Cache/Broker | Redis |
 | Task Queue | Celery (solo pool on Windows) |
-| Data Sources | kenyanstocks.com (primary), NSE scraper (afx.kwayisi.org), yfinance, CSV archive |
+| Data Sources | Marketscreener (historical primary), NSE scraper (afx.kwayisi.org), yfinance, CSV archive |
 | Frontend | React 18 + TypeScript + Vite + TailwindCSS v4 + Recharts |
 
 ## Quick Start
@@ -54,8 +54,11 @@ cd backend && venv\Scripts\alembic.exe upgrade head
 # Seed NSE market and companies
 cd backend && venv\Scripts\python.exe -m cli.commands seed-nse
 
-# Backfill historical prices from kenyanstocks.com (~248 days OHLCV per company)
-cd backend && venv\Scripts\python.exe -m cli.commands backfill-kenyanstocks
+# Backfill historical prices (Marketscreener first, then scraper/yfinance fallback)
+cd backend && venv\Scripts\python.exe -m cli.commands backfill-prices
+
+# Optional: purge old kenyanstocks price rows and rebuild from Marketscreener
+cd backend && venv\Scripts\python.exe -m cli.commands rebuild-marketscreener-prices
 ```
 
 ### 2. Frontend Setup
@@ -130,14 +133,17 @@ cd backend
 # Seed NSE market and companies
 venv\Scripts\python.exe -m cli.commands seed-nse
 
-# Backfill prices from kenyanstocks.com (~248 days OHLCV per company)
-venv\Scripts\python.exe -m cli.commands backfill-kenyanstocks
+# Backfill prices using production source order
+venv\Scripts\python.exe -m cli.commands backfill-prices
 
 # Backfill a specific company
-venv\Scripts\python.exe -m cli.commands backfill-kenyanstocks --ticker SCOM
+venv\Scripts\python.exe -m cli.commands backfill-prices --ticker SCOM
 
-# Backfill using all sources (kenyanstocks → scraper → yfinance)
-venv\Scripts\python.exe -m cli.commands backfill-prices
+# Backfill only verified Marketscreener companies
+venv\Scripts\python.exe -m cli.commands backfill-marketscreener
+
+# Purge kenyanstocks price rows, then rebuild from Marketscreener
+venv\Scripts\python.exe -m cli.commands rebuild-marketscreener-prices
 
 # Import historical CSV archive (2007-2025)
 venv\Scripts\python.exe -m cli.commands import-csv --dir "C:\path\to\archive"
@@ -171,7 +177,7 @@ venv\Scripts\python.exe -m pytest tests/ --cov=app --cov-report=term-missing
 | File | Tests | Covers |
 |------|-------|--------|
 | `test_stocks.py` | 31 | Markets, companies, prices, financials CRUD, valuations |
-| `test_price_fetcher.py` | 11 | Upsert idempotency, daily fetch, scraper/yfinance/kenyanstocks fallback, backfill |
+| `test_price_fetcher.py` | 12 | Upsert idempotency, daily fetch, Marketscreener/scraper/yfinance fallback, backfill |
 | `test_valuation_engine.py` | 41 | DCF, EPV, Book Value, composite calculations, edge cases |
 | `test_recommendation.py` | 22 | Recommendation engine: all rating levels, quality factors |
 | `test_alerts.py` | 19 | Alert CRUD, price/MOS triggering, mark-read, inactive |
@@ -204,7 +210,8 @@ StockUp/
 │   │   │   ├── valuation_engine.py    # DCF + EPV + Book Value
 │   │   │   └── recommendation_engine.py # Buy/Sell ratings
 │   │   ├── data/                # Data adapters
-│   │   │   ├── kenyanstocks_adapter.py # kenyanstocks.com (~248 days OHLCV)
+│   │   │   ├── marketscreener_adapter.py # Historical OHLCV via verified graphics URLs
+│   │   │   ├── kenyanstocks_adapter.py # Legacy price adapter (not used in price backfill)
 │   │   │   ├── nse_scraper.py         # afx.kwayisi.org (~10 days)
 │   │   │   ├── yfinance_adapter.py    # yfinance fallback
 │   │   │   ├── price_fetcher.py       # Orchestrator with priority fallback
@@ -239,14 +246,14 @@ StockUp/
 | Period | Source | Records |
 |--------|--------|---------|
 | Jan 2007 → May 6, 2025 | CSV archive import | ~247,788 |
-| May 7, 2025 → May 6, 2026 | kenyanstocks.com (OHLCV) | ~13,207 |
+| Historical (broad coverage) | Marketscreener (OHLCV) | rolling |
 | Various (recent) | NSE scraper (afx.kwayisi.org) | ~102 |
 | **Total** | **69 companies, 19 years** | **~261,097** |
 
 Data sources are used in priority order for backfilling:
-1. **kenyanstocks.com** — ~248 trading days of full OHLCV data
-2. **NSE scraper** (afx.kwayisi.org) — ~10 most recent trading days, close only
-3. **yfinance** — Full history but requires ticker mapping (`.NR` suffix)
+1. **Marketscreener** — Primary historical OHLCV source for companies with verified graphics URLs
+2. **NSE scraper** (afx.kwayisi.org) — Recent trading days, close-focused coverage
+3. **yfinance** — Additional fallback where ticker mapping is available (`.NR` suffix)
 
 ## Scheduled Tasks (Celery Beat)
 
@@ -263,7 +270,7 @@ Data sources are used in priority order for backfilling:
 - [x] **Milestone C**: Financials + Valuation Engine + Alerts
 - [x] **Milestone D**: Portfolio + Celery Jobs
 - [x] **Milestone E**: Frontend Dashboard (React + TypeScript)
-- [x] **Data Backfill**: kenyanstocks.com integration (248 days OHLCV)
+- [x] **Data Backfill**: Marketscreener-first historical ingestion with fallback sources
 
 ## API Endpoints
 

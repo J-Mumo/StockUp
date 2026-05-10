@@ -4,8 +4,8 @@ Usage:
     python -m cli.commands seed-nse
     python -m cli.commands backfill-prices
     python -m cli.commands backfill-prices --ticker SCOM
-    python -m cli.commands backfill-kenyanstocks
-    python -m cli.commands backfill-kenyanstocks --ticker SCOM
+    python -m cli.commands rebuild-marketscreener-prices
+    python -m cli.commands rebuild-marketscreener-prices --ticker SCOM
     python -m cli.commands update-prices-daily
 """
 
@@ -20,6 +20,7 @@ from app.database import SessionLocal
 from app.data.seed_data import seed_nse_market_and_companies
 from app.data.price_fetcher import backfill_all_prices, backfill_company_prices, fetch_daily_prices
 from app.models.company import Company
+from app.models.price_history import PriceHistory
 
 logging.basicConfig(
     level=logging.INFO,
@@ -84,62 +85,38 @@ def cmd_update_daily():
         db.close()
 
 
-def cmd_backfill_kenyanstocks(ticker: str = None, delay: float = 1.5):
-    """Backfill historical prices exclusively from kenyanstocks.com.
-    
-    This source provides ~248 days of OHLCV data per company.
-    """
-    from app.data import kenyanstocks_adapter
-    from app.data.price_fetcher import upsert_price
-    import time
+def cmd_rebuild_marketscreener_prices(ticker: str = None, delay: float = 2.0):
+    """Remove kenyanstocks price rows and rebuild from Marketscreener.
 
+    This is the replacement path for historical NSE data.
+    """
     db = SessionLocal()
     try:
+        query = db.query(Company)
         if ticker:
-            companies = db.query(Company).filter(
-                Company.ticker_symbol == ticker.upper()
-            ).all()
-            if not companies:
-                print(f"[ERROR] Company not found: {ticker}")
-                return
+            query = query.filter(Company.ticker_symbol == ticker.upper())
+            company_count = query.count()
         else:
-            companies = db.query(Company).filter(Company.is_active == True).all()
+            query = query.filter(Company.marketscreener_graphics_url.isnot(None))
+            company_count = query.count()
 
-        print(f"\n[INFO] Backfilling {len(companies)} companies from kenyanstocks.com")
-        total_upserted = 0
-        failed = []
+        if company_count == 0:
+            print("[INFO] No companies matched the requested Marketscreener rebuild.")
+            return
 
-        for i, company in enumerate(companies, 1):
-            print(f"  [{i}/{len(companies)}] {company.ticker_symbol}...", end=" ", flush=True)
-            try:
-                prices = kenyanstocks_adapter.fetch_history(company.ticker_symbol)
-                if prices:
-                    count = 0
-                    for price_data in prices:
-                        if price_data.get("close_price"):
-                            upsert_price(db, company.id, price_data)
-                            count += 1
-                    db.commit()
-                    total_upserted += count
-                    print(f"{count} prices")
-                else:
-                    print("no data")
-                    failed.append(company.ticker_symbol)
-            except Exception as e:
-                print(f"ERROR: {e}")
-                failed.append(company.ticker_symbol)
-                db.rollback()
+        delete_query = db.query(PriceHistory).filter(PriceHistory.source == "kenyanstocks")
+        if ticker:
+            company = db.query(Company).filter(Company.ticker_symbol == ticker.upper()).first()
+            if company:
+                delete_query = delete_query.filter(PriceHistory.company_id == company.id)
 
-            if i < len(companies):
-                time.sleep(delay)
-
-        print(f"\n[OK] Backfill complete:")
-        print(f"   Companies processed: {len(companies)}")
-        print(f"   Total prices upserted: {total_upserted}")
-        if failed:
-            print(f"   Failed ({len(failed)}): {', '.join(failed)}")
+        deleted = delete_query.delete(synchronize_session=False)
+        db.commit()
+        print(f"[OK] Deleted {deleted} kenyanstocks price rows")
     finally:
         db.close()
+
+    cmd_backfill_marketscreener(ticker=ticker, delay=delay)
 
 
 def cmd_set_marketscreener_url(ticker: str, graphics_url: str):
@@ -487,12 +464,12 @@ def main():
         print("  seed-nse              Seed NSE market and companies")
         print("  backfill-prices       Backfill historical prices (all sources, priority order)")
         print("  backfill-prices --ticker SCOM   Backfill for a specific company")
-        print("  backfill-kenyanstocks Backfill from kenyanstocks.com (~248 days OHLCV)")
-        print("  backfill-kenyanstocks --ticker SCOM   Backfill specific company")
         print("  set-marketscreener-url --ticker KCB --url https://.../graphics/")
         print("  sync-marketscreener-registry   Sync reviewed Marketscreener URLs into companies")
         print("  backfill-marketscreener Backfill only companies with verified Marketscreener URLs")
         print("  backfill-marketscreener --ticker KCB   Backfill specific company")
+        print("  rebuild-marketscreener-prices Purge kenyanstocks rows and rebuild from Marketscreener")
+        print("  rebuild-marketscreener-prices --ticker KCB   Rebuild specific company")
         print("  backfill-financials   Backfill financial statements from kenyanstocks.com")
         print("  backfill-financials --ticker SCOM   Backfill specific company")
         print("  enrich-financials     Fill missing data (FCF, CapEx) using AI")
@@ -529,9 +506,9 @@ def main():
             if idx + 1 < len(sys.argv):
                 delay = float(sys.argv[idx + 1])
         cmd_backfill_prices(ticker=ticker, delay=delay)
-    elif command == "backfill-kenyanstocks":
+    elif command == "rebuild-marketscreener-prices":
         ticker = None
-        delay = 1.5
+        delay = 2.0
         if "--ticker" in sys.argv:
             idx = sys.argv.index("--ticker")
             if idx + 1 < len(sys.argv):
@@ -540,7 +517,7 @@ def main():
             idx = sys.argv.index("--delay")
             if idx + 1 < len(sys.argv):
                 delay = float(sys.argv[idx + 1])
-        cmd_backfill_kenyanstocks(ticker=ticker, delay=delay)
+        cmd_rebuild_marketscreener_prices(ticker=ticker, delay=delay)
     elif command == "set-marketscreener-url":
         ticker = None
         url = None

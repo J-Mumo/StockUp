@@ -8,6 +8,7 @@ export interface User {
 
 export interface AuthResponse {
   access_token: string;
+  refresh_token: string;
   token_type: string;
 }
 
@@ -267,4 +268,14 @@ export interface ValuationTrendPoint {
   market_price: number | null;
   intrinsic_value: number | null;
   margin_of_safety_pct: number | null;
+}
+
+export interface CompanyNote {
+  id: number;
+  company_id: number;
+  user_id: number;
+  note_text: string;
+  tag: string | null;
+  created_at: string;
+  updated_at: string;
 }

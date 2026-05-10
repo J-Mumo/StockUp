@@ -3,24 +3,34 @@ import type { User } from '../types';
 
 interface AuthState {
   token: string | null;
+  refreshToken: string | null;
   user: User | null;
   isAuthenticated: boolean;
-  login: (token: string, user?: User) => void;
+  login: (token: string, refreshToken: string, user?: User) => void;
   logout: () => void;
   setUser: (user: User) => void;
+  setTokens: (token: string, refreshToken: string) => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
   token: localStorage.getItem('token'),
+  refreshToken: localStorage.getItem('refreshToken'),
   user: null,
   isAuthenticated: !!localStorage.getItem('token'),
-  login: (token: string, user?: User) => {
+  login: (token: string, refreshToken: string, user?: User) => {
     localStorage.setItem('token', token);
-    set({ token, isAuthenticated: true, user: user || null });
+    localStorage.setItem('refreshToken', refreshToken);
+    set({ token, refreshToken, isAuthenticated: true, user: user || null });
   },
   logout: () => {
     localStorage.removeItem('token');
-    set({ token: null, user: null, isAuthenticated: false });
+    localStorage.removeItem('refreshToken');
+    set({ token: null, refreshToken: null, user: null, isAuthenticated: false });
   },
   setUser: (user: User) => set({ user }),
+  setTokens: (token: string, refreshToken: string) => {
+    localStorage.setItem('token', token);
+    localStorage.setItem('refreshToken', refreshToken);
+    set({ token, refreshToken });
+  },
 }));

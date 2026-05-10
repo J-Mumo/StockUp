@@ -45,3 +45,8 @@ def get_current_user(
         )
 
     return user
+
+
+def get_current_user_id(current_user: User = Depends(get_current_user)) -> int:
+    """Return only the authenticated user's id for lightweight route deps."""
+    return current_user.id

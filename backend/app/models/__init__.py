@@ -10,6 +10,7 @@ from app.models.portfolio import Portfolio, PortfolioTransaction
 from app.models.alert import Alert
 from app.models.watchlist import Watchlist, WatchlistItem
 from app.models.analysis_snapshot import AnalysisSnapshot
+from app.models.company_note import CompanyNote
 
 __all__ = [
     "Market",
@@ -24,4 +25,5 @@ __all__ = [
     "Watchlist",
     "WatchlistItem",
     "AnalysisSnapshot",
+    "CompanyNote",
 ]
