@@ -1,12 +1,12 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, ReferenceLine, ComposedChart, BarChart, Bar,
 } from 'recharts';
-import { ArrowLeft, TrendingUp, Calculator, FileText, RefreshCw, BarChart3, ExternalLink, Edit3, Info, RotateCcw, Briefcase, MessageSquare, Trash2, Save, X, Plus } from 'lucide-react';
+import { ArrowLeft, TrendingUp, Calculator, FileText, RefreshCw, BarChart3, ExternalLink, Edit3, Info, RotateCcw, Briefcase, MessageSquare, Trash2, Save, X, Plus, Bot, Send } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { stocksApi, analysisApi, portfolioApi, notesApi } from '../lib/services';
-import type { CompanyDetail, PriceHistory, FinancialStatement, IntrinsicValue, Recommendation, ValuationTrendPoint, Holding, Portfolio, CompanyNote } from '../types';
+import { stocksApi, analysisApi, portfolioApi, notesApi, companyChatApi } from '../lib/services';
+import type { CompanyDetail, PriceHistory, FinancialStatement, IntrinsicValue, Recommendation, ValuationTrendPoint, Holding, Portfolio, CompanyNote, CompanyChatMessage, OnlineValidationSummary, CompanyChatContextMeta } from '../types';
 import { PageLoader } from '../components/ui/LoadingSpinner';
 
 type TimePeriod = '1D' | '5D' | '1M' | '6M' | 'YTD' | '1Y' | '5Y' | 'ALL';
@@ -67,6 +67,11 @@ export default function CompanyDetailPage() {
   const { id } = useParams<{ id: string }>();
   const companyId = Number(id);
 
+  const initialChatMessage: CompanyChatMessage = {
+    role: 'assistant',
+    content: 'Ask me about this company.',
+  };
+
   const [company, setCompany] = useState<CompanyDetail | null>(null);
   const [prices, setPrices] = useState<PriceHistory[]>([]);
   const [financials, setFinancials] = useState<FinancialStatement[]>([]);
@@ -95,6 +100,13 @@ export default function CompanyDetailPage() {
   const [editNoteText, setEditNoteText] = useState('');
   const [editNoteTag, setEditNoteTag] = useState('');
   const [showNotes, setShowNotes] = useState(true);
+  const [chatMessages, setChatMessages] = useState<CompanyChatMessage[]>([initialChatMessage]);
+  const chatLoadedRef = useRef(false);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const [validationSummary, setValidationSummary] = useState<OnlineValidationSummary | null>(null);
+  const [chatContextMeta, setChatContextMeta] = useState<CompanyChatContextMeta | null>(null);
+  const [chatCooldownSeconds, setChatCooldownSeconds] = useState(0);
 
   useEffect(() => {
     if (!companyId) return;
@@ -146,6 +158,69 @@ export default function CompanyDetailPage() {
     notesApi.list(companyId).then(res => setNotes(res.data)).catch(() => {});
   }, [companyId]);
 
+  // Load chat history from server, then localStorage as fallback
+  useEffect(() => {
+    if (!companyId) return;
+    chatLoadedRef.current = false;
+    companyChatApi.getHistory(companyId)
+      .then(res => {
+        if (res.data.messages && res.data.messages.length > 0) {
+          let msgs = res.data.messages.map(m => ({ role: m.role, content: m.content }));
+          // Deduplicate consecutive initial greetings
+          while (msgs.length > 1 && msgs[0].role === 'assistant' && msgs[0].content === initialChatMessage.content
+            && msgs[1].role === 'assistant' && msgs[1].content === initialChatMessage.content) {
+            msgs = msgs.slice(1);
+          }
+          setChatMessages(msgs);
+        } else {
+          loadFromLocalStorage();
+        }
+      })
+      .catch(() => loadFromLocalStorage())
+      .finally(() => { chatLoadedRef.current = true; });
+
+    function loadFromLocalStorage() {
+      const key = `company-chat-${companyId}`;
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) {
+          setChatMessages([initialChatMessage]);
+          return;
+        }
+        const parsed = JSON.parse(raw) as CompanyChatMessage[];
+        if (!Array.isArray(parsed) || parsed.length === 0) {
+          setChatMessages([initialChatMessage]);
+          return;
+        }
+        setChatMessages(parsed);
+      } catch {
+        setChatMessages([initialChatMessage]);
+      }
+    }
+  }, [companyId]);
+
+  // Persist chat history to localStorage and server
+  useEffect(() => {
+    if (!companyId || chatMessages.length === 0 || !chatLoadedRef.current) return;
+    const key = `company-chat-${companyId}`;
+    // Filter out any messages with empty or whitespace-only content
+    const filtered = chatMessages
+      .slice(-50)
+      .filter(m => m.content && m.content.trim().length > 0);
+    localStorage.setItem(key, JSON.stringify(filtered));
+    if (filtered.length > 0) {
+      companyChatApi.saveHistory(companyId, filtered).catch(() => {});
+    }
+  }, [companyId, chatMessages]);
+
+  useEffect(() => {
+    if (chatCooldownSeconds <= 0) return;
+    const timer = window.setInterval(() => {
+      setChatCooldownSeconds((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [chatCooldownSeconds]);
+
   const loadNotes = () => {
     notesApi.list(companyId).then(res => setNotes(res.data)).catch(() => {});
   };
@@ -176,6 +251,66 @@ export default function CompanyDetailPage() {
       loadNotes();
       toast.success('Note deleted');
     } catch { toast.error('Failed to delete note'); }
+  };
+
+  const handleSendChat = async () => {
+    const question = chatInput.trim();
+    if (!question || chatLoading || chatCooldownSeconds > 0) return;
+
+    const userMessage: CompanyChatMessage = { role: 'user', content: question };
+    const history = [...chatMessages, userMessage].slice(-10);
+
+    setChatMessages(prev => [...prev, userMessage]);
+    setChatInput('');
+    setChatLoading(true);
+
+    try {
+      const res = await companyChatApi.ask(companyId, {
+        question,
+        history,
+        verify_online: true,
+      });
+
+      setChatMessages(prev => [...prev, { role: 'assistant', content: res.data.answer }]);
+      setValidationSummary(res.data.online_validation);
+      setChatContextMeta(res.data.context_meta);
+    } catch (err: unknown) {
+      const axiosErr = err as {
+        response?: {
+          status?: number;
+          data?: { detail?: string };
+          headers?: Record<string, string>;
+        };
+      };
+      if (axiosErr.response?.status === 429) {
+        const retryAfterHeader = axiosErr.response.headers?.['retry-after'];
+        let retryAfter = Number.parseInt(retryAfterHeader || '', 10);
+        if (!Number.isFinite(retryAfter) || retryAfter <= 0) {
+          const detail = axiosErr.response.data?.detail || '';
+          const match = detail.match(/(\d+)\s+seconds/i);
+          retryAfter = match ? Number.parseInt(match[1], 10) : 30;
+        }
+        setChatCooldownSeconds(retryAfter);
+        toast.error(`Rate limit reached. Try again in ${retryAfter}s.`);
+      }
+      const backendDetail = axiosErr.response?.data?.detail;
+      const fallbackMessage = backendDetail
+        ? `Request failed: ${backendDetail}`
+        : 'I could not complete that request right now. Please try again in a moment.';
+
+      setChatMessages(prev => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: fallbackMessage,
+        },
+      ]);
+      if (axiosErr.response?.status !== 429) {
+        toast.error(backendDetail || 'AI chat request failed');
+      }
+    } finally {
+      setChatLoading(false);
+    }
   };
 
   const handleCompute = async (useCustom = false) => {
@@ -246,7 +381,15 @@ export default function CompanyDetailPage() {
       return sortedPrices.filter(p => p.price_date >= yearStart);
     }
     const days = PERIOD_DAYS[period];
-    return days >= sortedPrices.length ? sortedPrices : sortedPrices.slice(-days);
+    if (days >= 9999) return sortedPrices;
+    // PERIOD_DAYS values are calendar days, but sortedPrices only contains
+    // trading days. Compute a date cutoff and filter by date so that "5Y"
+    // really means "the last 5 calendar years" (not the last 1825 rows,
+    // which is ~7.2 calendar years given ~252 trading days/year).
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    return sortedPrices.filter(p => p.price_date >= cutoffStr);
   };
 
   // Price chart data filtered by period
@@ -281,7 +424,14 @@ export default function CompanyDetailPage() {
       sliced = trendData.filter(d => d.date >= yearStart);
     } else {
       const days = PERIOD_DAYS[trendPeriod];
-      sliced = days >= trendData.length ? trendData : trendData.slice(-days);
+      if (days >= 9999) {
+        sliced = trendData;
+      } else {
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - days);
+        const cutoffStr = cutoff.toISOString().slice(0, 10);
+        sliced = trendData.filter(d => d.date >= cutoffStr);
+      }
     }
     const marketPrices = sliced.map(d => d.market_price).filter((v): v is number => v != null);
     const maxMarket = Math.max(...marketPrices, 1);
@@ -1181,6 +1331,104 @@ export default function CompanyDetailPage() {
                 })}
               </div>
             )}
+          </div>
+        )}
+      </div>
+
+      {/* AI Chat */}
+      <div className="bg-dark-surface border border-dark-border rounded-xl p-6 mb-6">
+        <div className="flex items-center gap-2 mb-4">
+          <Bot size={18} className="text-cyan-400" />
+          <h3 className="text-lg font-semibold">AI Company Chat</h3>
+          <span className="text-xs text-gray-500">Database-grounded with online validation</span>
+        </div>
+
+        <div className="border border-dark-border rounded-lg p-3 bg-dark-bg max-h-96 overflow-y-auto space-y-3">
+          {chatMessages.map((msg, idx) => (
+            <div key={`${msg.role}-${idx}`} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
+                msg.role === 'user'
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-dark-surface border border-dark-border text-gray-100'
+              }`}>
+                {msg.content}
+              </div>
+            </div>
+          ))}
+          {chatLoading && (
+            <div className="text-xs text-gray-500">Analyzing latest company data...</div>
+          )}
+        </div>
+
+        <div className="mt-3 flex gap-2">
+          <textarea
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSendChat();
+              }
+            }}
+            rows={2}
+            placeholder="Ask about valuation, growth quality, risks, or whether DB prices look consistent with online quotes..."
+            className="flex-1 bg-dark-bg border border-dark-border rounded px-3 py-2 text-sm text-white placeholder-gray-500 resize-none focus:outline-none focus:border-primary-500"
+            disabled={chatCooldownSeconds > 0}
+          />
+          <button
+            onClick={handleSendChat}
+            disabled={!chatInput.trim() || chatLoading || chatCooldownSeconds > 0}
+            className="h-fit self-end flex items-center gap-1.5 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm px-3 py-2 rounded transition-colors"
+          >
+            <Send size={14} /> Send
+          </button>
+        </div>
+
+        {chatCooldownSeconds > 0 && (
+          <p className="mt-2 text-xs text-orange-400">
+            AI chat is temporarily rate-limited. You can send again in {chatCooldownSeconds}s.
+          </p>
+        )}
+
+        {validationSummary && (
+          <div className="mt-3 text-xs text-gray-400 border border-dark-border rounded-lg p-3 bg-dark-bg">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-gray-300">Data validity:</span>
+              <span className={`px-2 py-0.5 rounded text-white ${
+                validationSummary.status === 'match' ? 'bg-green-600' :
+                validationSummary.status === 'mismatch' ? 'bg-red-600' :
+                validationSummary.status === 'partial' ? 'bg-yellow-600' : 'bg-gray-600'
+              }`}>
+                {validationSummary.status}
+              </span>
+              {validationSummary.source && <span>source: {validationSummary.source}</span>}
+            </div>
+            <p>
+              DB: {validationSummary.db_close_price != null ? validationSummary.db_close_price.toFixed(2) : '—'}
+              {' '}({validationSummary.db_price_date || 'n/a'})
+              {' '}| Online: {validationSummary.online_close_price != null ? validationSummary.online_close_price.toFixed(2) : '—'}
+              {' '}({validationSummary.online_price_date || 'n/a'})
+              {validationSummary.price_diff_pct != null && (
+                <>
+                  {' '}| Diff: {validationSummary.price_diff_pct >= 0 ? '+' : ''}{validationSummary.price_diff_pct.toFixed(2)}%
+                </>
+              )}
+            </p>
+            {validationSummary.note && <p className="mt-1 text-gray-500">{validationSummary.note}</p>}
+          </div>
+        )}
+
+        {chatContextMeta && (
+          <div className="mt-2 text-xs text-gray-400 flex flex-wrap gap-2">
+            <span className="px-2 py-1 rounded bg-dark-bg border border-dark-border">
+              Price date: {chatContextMeta.latest_db_price_date || 'n/a'}
+            </span>
+            <span className="px-2 py-1 rounded bg-dark-bg border border-dark-border">
+              Valuation date: {chatContextMeta.latest_valuation_date || 'n/a'}
+            </span>
+            <span className="px-2 py-1 rounded bg-dark-bg border border-dark-border">
+              Latest FY: {chatContextMeta.latest_financial_year ?? 'n/a'}
+            </span>
           </div>
         )}
       </div>
