@@ -313,12 +313,81 @@ def cmd_sync_financial_statements(ticker: str = None, parse: bool = True):
         db.close()
 
 
+def cmd_extract_goals(ticker: str, fiscal_year: int, force: bool = False) -> None:
+    """Extract management goals from a single year's annual report.
+
+    Usage:
+        python -m cli.commands extract-goals --ticker BAT --fiscal-year 2024
+        python -m cli.commands extract-goals --ticker BAT --fiscal-year 2024 --force
+    """
+    from app.data.company_goals_extractor import extract_goals_from_report
+    from app.models.company import Company
+
+    db = SessionLocal()
+    try:
+        company = (
+            db.query(Company).filter(Company.ticker_symbol == ticker.upper()).first()
+        )
+        if not company:
+            print(f"[ERROR] Company not found: {ticker}")
+            return
+
+        print(f"Extracting goals for {company.name} FY{fiscal_year}...")
+        result = extract_goals_from_report(
+            db, company, fiscal_year, skip_if_exists=not force
+        )
+        for k, v in result.items():
+            print(f"  {k}: {v}")
+    finally:
+        db.close()
+
+
+def cmd_assess_goals(
+    ticker: str,
+    *,
+    no_llm: bool = False,
+    pace_seconds: float = 60.0,
+) -> None:
+    """Assess all stored goals for a company against later fiscal years.
+
+    Mechanical evaluation runs first (free); LLM is the fallback unless
+    --no-llm is passed.
+
+    Usage:
+        python -m cli.commands assess-goals --ticker BAT
+        python -m cli.commands assess-goals --ticker BAT --no-llm
+    """
+    from app.data.company_goals_extractor import assess_all_goals_for_company
+    from app.models.company import Company
+
+    db = SessionLocal()
+    try:
+        company = (
+            db.query(Company).filter(Company.ticker_symbol == ticker.upper()).first()
+        )
+        if not company:
+            print(f"[ERROR] Company not found: {ticker}")
+            return
+
+        print(f"Assessing goals for {company.name} (LLM fallback: {not no_llm})...")
+        summary = assess_all_goals_for_company(
+            db,
+            company,
+            allow_llm_fallback=not no_llm,
+            pace_seconds=pace_seconds,
+        )
+        for k, v in summary.items():
+            print(f"  {k}: {v}")
+    finally:
+        db.close()
+
+
 def cmd_enrich_cash_flow(ticker: str = None, year_start: int = 2020, year_end: int = 2026):
     """Enrich cash flow (OCF, CapEx, FCF) for companies from downloaded PDFs.
-    
+
     Extracts operating cash flow and capital expenditures from annual reports,
     then calculates and stores Free Cash Flow = OCF - CapEx.
-    
+
     Usage:
         python -m cli.commands enrich-cash-flow --ticker KCB
         python -m cli.commands enrich-cash-flow --ticker KCB --year-start 2022 --year-end 2025
@@ -650,6 +719,38 @@ def main():
             if idx + 1 < len(sys.argv):
                 ticker = sys.argv[idx + 1]
         cmd_sync_financial_statements(ticker=ticker, parse=parse)
+    elif command == "extract-goals":
+        ticker = None
+        fiscal_year = None
+        force = "--force" in sys.argv
+        if "--ticker" in sys.argv:
+            idx = sys.argv.index("--ticker")
+            if idx + 1 < len(sys.argv):
+                ticker = sys.argv[idx + 1]
+        if "--fiscal-year" in sys.argv:
+            idx = sys.argv.index("--fiscal-year")
+            if idx + 1 < len(sys.argv):
+                fiscal_year = int(sys.argv[idx + 1])
+        if not ticker or fiscal_year is None:
+            print("Usage: python -m cli.commands extract-goals --ticker BAT --fiscal-year 2024 [--force]")
+            return
+        cmd_extract_goals(ticker=ticker, fiscal_year=fiscal_year, force=force)
+    elif command == "assess-goals":
+        ticker = None
+        no_llm = "--no-llm" in sys.argv
+        pace_seconds = 60.0
+        if "--ticker" in sys.argv:
+            idx = sys.argv.index("--ticker")
+            if idx + 1 < len(sys.argv):
+                ticker = sys.argv[idx + 1]
+        if "--pace" in sys.argv:
+            idx = sys.argv.index("--pace")
+            if idx + 1 < len(sys.argv):
+                pace_seconds = float(sys.argv[idx + 1])
+        if not ticker:
+            print("Usage: python -m cli.commands assess-goals --ticker BAT [--no-llm] [--pace 60]")
+            return
+        cmd_assess_goals(ticker=ticker, no_llm=no_llm, pace_seconds=pace_seconds)
     elif command == "enrich-cash-flow":
         ticker = None
         year_start = 2020

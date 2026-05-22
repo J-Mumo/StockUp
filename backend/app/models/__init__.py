@@ -12,6 +12,7 @@ from app.models.watchlist import Watchlist, WatchlistItem
 from app.models.analysis_snapshot import AnalysisSnapshot
 from app.models.company_note import CompanyNote
 from app.models.company_chat import CompanyChat
+from app.models.company_goal import CompanyGoal, CompanyGoalProgress
 
 __all__ = [
     "Market",
@@ -28,4 +29,6 @@ __all__ = [
     "AnalysisSnapshot",
     "CompanyNote",
     "CompanyChat",
+    "CompanyGoal",
+    "CompanyGoalProgress",
 ]
