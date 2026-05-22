@@ -20,6 +20,9 @@ import type {
   AnalysisSnapshot,
   ValuationTrendPoint,
   CompanyNote,
+  CompanyChatMessage,
+  CompanyChatResponse,
+  ChatHistoryResponse,
 } from '../types';
 
 // Auth
@@ -149,4 +152,14 @@ export const notesApi = {
     api.put<CompanyNote>(`/stocks/companies/${companyId}/notes/${noteId}`, data),
   delete: (companyId: number, noteId: number) =>
     api.delete(`/stocks/companies/${companyId}/notes/${noteId}`),
+};
+
+// Company AI Chat
+export const companyChatApi = {
+  ask: (companyId: number, data: { question: string; history?: CompanyChatMessage[]; verify_online?: boolean }) =>
+    api.post<CompanyChatResponse>(`/stocks/companies/${companyId}/chat`, data),
+  saveHistory: (companyId: number, messages: CompanyChatMessage[]) =>
+    api.post(`/stocks/companies/${companyId}/chat-history`, { messages }),
+  getHistory: (companyId: number) =>
+    api.get<ChatHistoryResponse>(`/stocks/companies/${companyId}/chat-history`),
 };

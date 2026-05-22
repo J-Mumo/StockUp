@@ -53,3 +53,14 @@ htmlcov/
 backend/alembic/versions/__pycache__/
 "backend/'2026-01-01'"  
 backend/explore_nse.py 
+
+# Cached annual reports (per-company PDFs)
+backend/data/annual_reports/
+
+# Ad-hoc probe/scratch scripts
+backend/_*.py
+backend/_*.txt
+backend/inspect_html.py
+backend/tmp_*.py
+backend/_bat2014_raw.txt
+

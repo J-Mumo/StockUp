@@ -1,4 +1,4 @@
-"""Recommendation Engine — quantitative stock recommendation logic.
+"""Recommendation Engine G�� quantitative stock recommendation logic.
 
 Generates buy/sell/hold recommendations based on:
 - Margin of Safety (MOS)
@@ -49,6 +49,7 @@ class QualityScore:
     value: float | None = None
     threshold: str = ""
     detail: str = ""
+    insufficient_data: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -59,6 +60,7 @@ class QualityScore:
             "value": self.value,
             "threshold": self.threshold,
             "detail": self.detail,
+            "insufficient_data": self.insufficient_data,
         }
 
 
@@ -316,6 +318,7 @@ def _assess_fcf(financials: list[FinancialStatement]) -> QualityScore:
             value=None,
             threshold="Positive FCF in majority of years",
             detail="No FCF data available",
+            insufficient_data=True,
         )
 
     positive_years = sum(1 for _, f in fcfs if f > 0)
@@ -343,7 +346,7 @@ def _assess_fcf(financials: list[FinancialStatement]) -> QualityScore:
 
 
 def _assess_dividends(financials: list[FinancialStatement]) -> QualityScore:
-    """Dividend consistency — paid dividends in most years."""
+    """Dividend consistency G�� paid dividends in most years."""
     divs = []
     for fs in financials:
         dps = _safe_float(fs.dividends_per_share)
@@ -410,6 +413,7 @@ def _assess_fcf_increasing(financials: list[FinancialStatement]) -> QualityScore
             value=None,
             threshold="FCF increasing for 3+ consecutive years",
             detail=f"Insufficient FCF data ({len(fcfs)} years)",
+            insufficient_data=True,
         )
 
     # Check last 3 consecutive years
@@ -514,6 +518,7 @@ def _assess_capital_efficiency(financials: list[FinancialStatement]) -> QualityS
         value=None,
         threshold="FCF / Revenue > 5%",
         detail="No FCF or revenue data available",
+        insufficient_data=True,
     )
 
 
@@ -560,38 +565,33 @@ def generate_recommendation(
             quality=quality,
         )
 
-    mos_pct = margin_of_safety * 100  # Convert to percentage for display
+    mos_pct = margin_of_safety * 100
 
-    # Core quality gate: 5 key factors for buy eligibility
-    core_factors = [
-        quality.has_fcf_increasing,       # FCF increasing 3+ years
-        quality.has_earnings_growth,       # Consistently increasing earnings
-        quality.has_conservative_debt,     # Liabilities < 4x NI
-        quality.has_high_roe,              # ROE > 15%
-        quality.has_capital_efficiency,    # FCF/Revenue > 5%
-    ]
-    core_passed = sum(1 for f in core_factors if f)
-    all_core_pass = core_passed == 5
+    # Core factors: FCF increasing, earnings growth, conservative debt, ROE, capital efficiency.
+    # Indexes reference quality.factors order from assess_quality().
+    core_factor_indices = [6, 2, 8, 0, 9]
+    core_factors = [quality.factors[i] for i in core_factor_indices]
+    available_core = [f for f in core_factors if not f.insufficient_data]
+    core_passed = sum(1 for f in available_core if f.passed)
+    core_total = len(available_core)
+    all_core_pass = core_total == 5 and core_passed == 5
+    missing_core = 5 - core_total
 
-    # Supplementary quality factors
     has_low_de = quality.has_low_leverage
     has_dividends = quality.has_dividend_consistency
-    has_revenue = quality.has_revenue_consistency
 
-    # Build failing factors description for reason text
     failing = []
     if not quality.has_high_roe:
         failing.append("ROE < 15%")
-    if not quality.has_fcf_increasing:
-        failing.append("FCF not consistently increasing")
     if not quality.has_earnings_growth:
         failing.append("earnings not growing")
     if not quality.has_conservative_debt:
         failing.append("high debt/earnings ratio")
-    if not quality.has_capital_efficiency:
+    if not quality.factors[6].insufficient_data and not quality.has_fcf_increasing:
+        failing.append("FCF not consistently increasing")
+    if not quality.factors[9].insufficient_data and not quality.has_capital_efficiency:
         failing.append("low capital efficiency")
 
-    # Decision logic (ordered from most bullish to most bearish)
     if margin_of_safety > 0.30:
         if all_core_pass and has_low_de and has_dividends:
             action = "Strong Buy"
@@ -608,26 +608,37 @@ def generate_recommendation(
             )
         else:
             action = "Hold"
-            reason = (
-                f"Undervalued ({mos_pct:.1f}% MOS) but quality gate not met "
-                f"({core_passed}/5 core factors). Fails: {', '.join(failing)}. "
-                f"Potential value trap — hold until quality improves"
-            )
+            if missing_core > 0:
+                reason = (
+                    f"Undervalued ({mos_pct:.1f}% MOS) but quality gate is incomplete "
+                    f"({core_total}/5 core factors available). Additional cash flow data is needed."
+                )
+            else:
+                reason = (
+                    f"Undervalued ({mos_pct:.1f}% MOS) but quality gate not met "
+                    f"({core_passed}/5 core factors). Fails: {', '.join(failing)}. "
+                    f"Potential value trap — hold until quality improves"
+                )
     elif margin_of_safety > 0.10:
-        if core_passed >= 4:
+        if core_total >= 4 and core_passed >= 4:
             action = "Accumulate"
             reason = (
                 f"Moderately undervalued: {mos_pct:.1f}% margin of safety "
-                f"with {core_passed}/5 core quality factors — suitable for "
-                f"gradual accumulation"
+                f"with {core_passed}/{core_total} available core quality factors passing"
             )
         else:
             action = "Hold"
-            reason = (
-                f"Marginally undervalued: {mos_pct:.1f}% margin of safety "
-                f"but quality insufficient ({core_passed}/5 core factors). "
-                f"Fails: {', '.join(failing)}"
-            )
+            if missing_core > 0:
+                reason = (
+                    f"Marginally undervalued: {mos_pct:.1f}% margin of safety, "
+                    f"but only {core_total}/5 core quality factors are available."
+                )
+            else:
+                reason = (
+                    f"Marginally undervalued: {mos_pct:.1f}% margin of safety "
+                    f"but quality insufficient ({core_passed}/5 core factors). "
+                    f"Fails: {', '.join(failing)}"
+                )
     elif margin_of_safety >= 0:
         action = "Hold"
         reason = (

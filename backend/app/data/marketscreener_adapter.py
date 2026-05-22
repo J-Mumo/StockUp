@@ -119,21 +119,33 @@ async def fetch_history(graphics_url: str, headless: bool = True) -> list[dict]:
     session = requests.Session()
     session.headers.update({"User-Agent": USER_AGENT})
 
-    graphics_response = session.get(graphics_url, timeout=45)
-    graphics_response.raise_for_status()
-    iframe_url = _extract_iframe_url(graphics_response.text)
-
+    # Try plain HTTP first; fall back to Playwright if Marketscreener blocks us
+    # (commonly with HTTP 403 from their bot protection).
+    iframe_url = None
     settings = None
-    if iframe_url:
-        iframe_response = session.get(iframe_url, timeout=45)
-        iframe_response.raise_for_status()
-        settings = _extract_application_settings(iframe_response.text)
+    graphics_html = None
+    try:
+        graphics_response = session.get(graphics_url, timeout=45)
+        graphics_response.raise_for_status()
+        graphics_html = graphics_response.text
+        iframe_url = _extract_iframe_url(graphics_html)
+        if iframe_url:
+            iframe_response = session.get(iframe_url, timeout=45)
+            iframe_response.raise_for_status()
+            settings = _extract_application_settings(iframe_response.text)
+    except requests.HTTPError as exc:
+        # 403/429/etc — handled below via Playwright. Anything else, re-raise.
+        if exc.response is None or exc.response.status_code not in (401, 403, 429):
+            raise
+        iframe_url = None
+        settings = None
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=headless)
+        # Marketscreener's bot protection blocks headless Chromium with 403,
+        # but accepts Firefox. Use Firefox for the browser-based fallback.
+        browser = await p.firefox.launch(headless=headless)
         context = await browser.new_context(
             viewport={"width": 1600, "height": 1000},
-            user_agent=USER_AGENT,
         )
 
         if not iframe_url or not settings:
@@ -169,6 +181,21 @@ async def fetch_history(graphics_url: str, headless: bool = True) -> list[dict]:
             raise RuntimeError("No Marketscreener instruments were exposed by the chart app")
 
         history_url = _build_history_url(settings, instruments[0]["id"])
+
+        # Copy cookies from Playwright context into the requests session so
+        # the JSON history endpoint accepts our follow-up HTTP call. Without
+        # this, Marketscreener's bot protection will return 403.
+        try:
+            for cookie in await context.cookies():
+                session.cookies.set(
+                    cookie["name"],
+                    cookie["value"],
+                    domain=cookie.get("domain"),
+                    path=cookie.get("path", "/"),
+                )
+        except Exception:
+            pass
+
         body_text = ""
         try:
             history_response = session.get(

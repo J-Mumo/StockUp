@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     ai_model: str = ""  # Leave blank for provider default
+    ai_chat_rate_limit_requests: int = 20
+    ai_chat_rate_limit_window_seconds: int = 600
 
     # Annual Report Parser
     pdf_cache_dir: str = "data/annual_reports"

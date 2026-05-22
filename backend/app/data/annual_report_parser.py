@@ -249,22 +249,81 @@ def _parse_extraction_response(
     ticker: str,
     fiscal_year: int,
 ) -> dict[str, Any] | None:
-    """Parse the LLM extraction response into structured data."""
-    # Strip markdown fences
-    if text.startswith("```"):
-        lines = text.split("\n")
-        text = "\n".join(lines[1:-1])
+    """Parse the LLM extraction response into structured data.
 
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as e:
+    The model occasionally wraps JSON in markdown fences, adds JS-style
+    comments, or leaves trailing commas. Be tolerant of these so a single
+    formatting glitch doesn't drop an otherwise good extraction.
+    """
+    import re as _re
+
+    raw = text or ""
+
+    def _try_load(s: str) -> dict[str, Any] | None:
+        try:
+            return json.loads(s)
+        except json.JSONDecodeError:
+            return None
+
+    # 1) Strip ```json ... ``` fences (anywhere in the string, not just at start).
+    fence_match = _re.search(r"```(?:json|JSON)?\s*\n?(.*?)```", raw, flags=_re.DOTALL)
+    candidate = fence_match.group(1) if fence_match else raw
+
+    data = _try_load(candidate.strip())
+
+    # 2) Extract the largest {...} object from the candidate.
+    if data is None:
+        brace_match = _re.search(r"\{.*\}", candidate, flags=_re.DOTALL)
+        if brace_match:
+            data = _try_load(brace_match.group(0))
+
+    # 3) Remove JS-style line comments and trailing commas.
+    if data is None and brace_match:
+        cleaned = brace_match.group(0)
+        cleaned = _re.sub(r"//[^\n]*", "", cleaned)
+        cleaned = _re.sub(r"/\*.*?\*/", "", cleaned, flags=_re.DOTALL)
+        cleaned = _re.sub(r",(\s*[}\]])", r"\1", cleaned)
+        data = _try_load(cleaned)
+
+    # 4) Evaluate trivial integer/float arithmetic that the model sometimes
+    #    emits in place of a single number, e.g. ``"total_liabilities":
+    #    2943683000 + 7182905000``. We only handle plus/minus between
+    #    plain numeric literals to avoid arbitrary code execution.
+    if data is None and brace_match:
+        cleaned = brace_match.group(0)
+        cleaned = _re.sub(r"//[^\n]*", "", cleaned)
+        cleaned = _re.sub(r"/\*.*?\*/", "", cleaned, flags=_re.DOTALL)
+        cleaned = _re.sub(r",(\s*[}\]])", r"\1", cleaned)
+
+        def _eval_sum(m: _re.Match[str]) -> str:
+            expr = m.group(0)
+            try:
+                total = 0.0
+                # Tokenise as alternating signs and numbers.
+                tokens = _re.findall(r"[+-]?\s*\d+(?:\.\d+)?", expr)
+                for t in tokens:
+                    total += float(t.replace(" ", ""))
+                # Preserve int formatting when possible.
+                if total == int(total):
+                    return str(int(total))
+                return repr(total)
+            except Exception:
+                return expr
+
+        cleaned = _re.sub(
+            r"(?<=[:\[,\s])-?\d+(?:\.\d+)?(?:\s*[+\-]\s*-?\d+(?:\.\d+)?)+",
+            _eval_sum,
+            cleaned,
+        )
+        data = _try_load(cleaned)
+
+    if data is None:
         logger.error(
-            "Failed to parse extraction response for %s FY%d: %s",
+            "Failed to parse extraction response for %s FY%d after tolerant attempts",
             ticker,
             fiscal_year,
-            e,
         )
-        logger.debug("Raw response: %s", text[:500])
+        logger.warning("Raw response (first 800 chars): %s", raw[:800])
         return None
 
     # Ensure fiscal_year matches
@@ -351,6 +410,137 @@ def _validate_pdf_extraction(
     return record, issues
 
 
+def _normalize_record_magnitude(
+    db: Session,
+    company: Company,
+    record: dict[str, Any],
+) -> tuple[dict[str, Any], str | None]:
+    """Normalize likely unit-scale mismatches against neighbouring history.
+
+    Some reports present values in thousands/millions and the extractor may
+    miss one order-of-magnitude conversion. This helper applies a conservative
+    multiplier when current monetary fields are implausibly tiny vs the
+    nearest available year (preferring prior, falling back to next year so
+    that ingestion order does not affect correctness).
+    """
+    year = record.get("fiscal_year")
+    if not year:
+        return record, None
+
+    def _baseline_for(offset: int) -> FinancialStatement | None:
+        return (
+            db.query(FinancialStatement)
+            .filter(
+                FinancialStatement.company_id == company.id,
+                FinancialStatement.fiscal_year == int(year) + offset,
+            )
+            .first()
+        )
+
+    baseline: FinancialStatement | None = None
+    for offset in (-1, 1, -2, 2):
+        candidate = _baseline_for(offset)
+        if candidate is not None:
+            baseline = candidate
+            break
+
+    if baseline is None:
+        return record, None
+
+    # Vote on a multiplier across several large monetary fields. A single
+    # field can mislead (e.g., revenue line missing), but if multiple
+    # large-magnitude fields all agree on the same scale gap, that is a
+    # strong signal of a unit mismatch.
+    comparison_fields = [
+        "revenue",
+        "net_income",
+        "total_assets",
+        "total_liabilities",
+        "total_equity",
+        "operating_cash_flow",
+    ]
+
+    votes: dict[int, int] = {1000: 0, 1000000: 0}
+    samples = 0
+    for field in comparison_fields:
+        curr = _safe_num(record.get(field))
+        prev = _safe_num(getattr(baseline, field, None))
+        if curr is None or prev is None or prev <= 0 or curr <= 0:
+            continue
+        samples += 1
+        ratio = prev / curr
+        if 300 <= ratio <= 3000:
+            votes[1000] += 1
+        elif 300_000 <= ratio <= 3_000_000:
+            votes[1000000] += 1
+
+    multiplier: int | None = None
+    # Require at least 2 agreeing fields (or 1 if only 1 comparable sample)
+    threshold = 2 if samples >= 2 else 1
+    if votes[1000000] >= threshold and votes[1000000] >= votes[1000]:
+        multiplier = 1000000
+    elif votes[1000] >= threshold:
+        multiplier = 1000
+
+    if not multiplier:
+        return record, None
+
+    # Apply the multiplier only to fields whose current/baseline ratio
+    # individually matches the voted scale. Some LLM extractions return
+    # mixed scales within a single record (e.g., revenue in millions but
+    # assets already in shillings); blindly multiplying every monetary
+    # field would then inflate the already-correct ones.
+    monetary_fields = [
+        "revenue",
+        "net_income",
+        "total_assets",
+        "total_liabilities",
+        "total_equity",
+        "operating_cash_flow",
+        "capital_expenditures",
+        "free_cash_flow",
+    ]
+
+    if multiplier == 1000:
+        lo, hi = 30, 30_000
+    else:
+        lo, hi = 30_000, 30_000_000
+
+    scaled_fields: list[str] = []
+    for field in monetary_fields:
+        curr = _safe_num(record.get(field))
+        if curr is None:
+            continue
+        prev = _safe_num(getattr(baseline, field, None))
+        # Only scale a field when its own current/baseline ratio matches
+        # the voted scale. If the baseline value for this specific field
+        # is missing, leave the value alone — over-scaling an
+        # already-correct field (e.g., free_cash_flow) is worse than
+        # leaving one field at the wrong unit.
+        if prev is None or prev <= 0:
+            continue
+        ratio = prev / curr if curr > 0 else (-prev / curr if curr < 0 else 0)
+        if lo <= ratio <= hi:
+            record[field] = curr * multiplier
+            scaled_fields.append(field)
+
+    if not scaled_fields:
+        return record, None
+
+    note = (
+        f"scaled {','.join(scaled_fields)} by x{multiplier} vs "
+        f"FY{baseline.fiscal_year} baseline "
+        f"({votes[1000]}x1k votes, {votes[1000000]}x1M votes)"
+    )
+    logger.warning(
+        "PDF normalization [%s FY%s]: %s",
+        company.ticker_symbol,
+        year,
+        note,
+    )
+    return record, note
+
+
 # ---------------------------------------------------------------------------
 # Database Upsert
 # ---------------------------------------------------------------------------
@@ -371,6 +561,21 @@ def _upsert_pdf_financials(
     """
     fiscal_year = record.get("fiscal_year")
     if not fiscal_year:
+        return "skipped"
+
+    # Refuse to write rows that contain no meaningful financial data — this
+    # happens when the PDF turned out to be an AGM notice, calendar, or other
+    # non-annual-report document and the LLM returned all-null fields.
+    key_fields = (
+        "revenue", "net_income", "total_assets", "total_equity",
+        "operating_cash_flow",
+    )
+    if not any(_safe_num(record.get(f)) for f in key_fields):
+        logger.warning(
+            "Skipping %s FY%d upsert: no key financial fields extracted",
+            company.ticker_symbol,
+            fiscal_year,
+        )
         return "skipped"
 
     existing = (
@@ -451,15 +656,45 @@ def parse_annual_report(
     fiscal_year: int,
     *,
     force_redownload: bool = False,
+    skip_if_exists: bool = False,
 ) -> dict[str, Any]:
     """Parse a single annual report PDF and upsert financial data.
 
     Full pipeline: download -> extract -> validate -> upsert.
 
+    When ``skip_if_exists`` is True, an existing FinancialStatement row
+    with substantive data (any of revenue/net_income/total_assets/
+    total_equity already populated) short-circuits the pipeline before
+    the OpenAI call, saving an API request.
+
     Returns summary dict with status and details.
     """
     ticker = company.ticker_symbol
     name = company.name
+
+    # Step 0 (optional): skip if we already have substantive data for
+    # this fiscal year. Saves an OpenAI extraction call.
+    if skip_if_exists:
+        from app.models.financial_statement import FinancialStatement
+
+        existing = (
+            db.query(FinancialStatement)
+            .filter(
+                FinancialStatement.company_id == company.id,
+                FinancialStatement.fiscal_year == fiscal_year,
+                FinancialStatement.period_type == "annual",
+            )
+            .first()
+        )
+        if existing and any(
+            getattr(existing, f, None) is not None
+            for f in ("revenue", "net_income", "total_assets", "total_equity")
+        ):
+            return {
+                "ticker": ticker,
+                "fiscal_year": fiscal_year,
+                "status": "skipped_existing",
+            }
 
     # Step 1: Download PDF
     pdf_path = download_annual_report(
@@ -492,6 +727,11 @@ def parse_annual_report(
 
     # Step 3: Validate
     validated, issues = _validate_pdf_extraction(extracted, ticker)
+
+    # Step 3b: Normalize unit scale against prior-year history
+    validated, scale_note = _normalize_record_magnitude(db, company, validated)
+    if scale_note:
+        issues.append(scale_note)
 
     # Step 4: Upsert to database
     action = _upsert_pdf_financials(db, company, validated)

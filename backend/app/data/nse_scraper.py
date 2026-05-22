@@ -79,17 +79,18 @@ def scrape_current_prices() -> list[dict]:
 
     # Use regex on the main company listing table (index 3)
     # The listing table has rows like:
-    # <tr><td><a href="...">TICKER</a> CompanyName<td>VOLUME<td>PRICE<td>CHANGE<td>CHANGE%
+    # <tr><td><a href="...">TICKER</a><td><a href="...">Company Name</a><td>VOLUME<td>PRICE<td>CHANGE
+    # (Note: as of 2026, company name is wrapped in <a> and there is no
+    # separate Change% column.)
     raw_html = str(tables[3])
 
-    # Pattern: ticker link, then volume, price, change, change%
+    # Pattern: ticker link, then name link, volume, price, change
     listing_pattern = re.compile(
-        r'<a[^>]*>([A-Z0-9]+)</a>'  # ticker
-        r'[^<]*'                     # company name text
-        r'<td>([\d,.]*)'            # volume
-        r'<td>([\d.]+)'             # price
-        r'<td[^>]*>([^<]*)'         # change
-        r'<td[^>]*>([^<]*)'         # change%
+        r'<a[^>]*>([A-Z0-9]+)</a>'   # ticker
+        r'<td><a[^>]*>[^<]*</a>'      # company name link (discarded)
+        r'<td>([\d,.]*)'             # volume (may be empty)
+        r'<td[^>]*>([\d.]+)'         # price
+        r'<td[^>]*>([^<]*)'          # change (may be empty)
     )
 
     results = []
@@ -98,14 +99,13 @@ def scrape_current_prices() -> list[dict]:
         volume = _parse_number(match.group(2))
         price = _parse_number(match.group(3))
         change = _parse_number(match.group(4))
-        change_pct = _parse_number(match.group(5))
 
         if price is not None:
             results.append({
                 "ticker": ticker,
                 "close_price": price,
                 "change": change,
-                "change_pct": change_pct,
+                "change_pct": None,
                 "volume": int(volume) if volume else None,
                 "price_date": date.today(),
                 "source": "scraper",

@@ -264,6 +264,113 @@ def cmd_backfill_financials(ticker: str = None, delay: float = 1.5):
         db.close()
 
 
+def cmd_sync_financial_statements(ticker: str = None, parse: bool = True):
+    """Sync financial statements from company IR registry pages.
+    
+    For example:
+        python -m cli.commands sync-financial-statements --ticker KCB --url https://kcbgroup.com/financial-statements
+    """
+    from app.data.financial_statements_registry import sync_financial_statements_registry
+    from app.models.company import Company
+    
+    db = SessionLocal()
+    try:
+        # Get URL from command line or company record
+        url = None
+        if "--url" in sys.argv:
+            idx = sys.argv.index("--url")
+            if idx + 1 < len(sys.argv):
+                url = sys.argv[idx + 1]
+        
+        if ticker:
+            company = db.query(Company).filter(Company.ticker_symbol == ticker.upper()).first()
+            if not company:
+                print(f"[ERROR] Company not found: {ticker}")
+                return
+            
+            if not url:
+                url = company.financial_statements_url
+                if not url:
+                    print(f"[ERROR] No financial statements URL provided or stored for {ticker}")
+                    print(f"        Use: python -m cli.commands sync-financial-statements --ticker {ticker} --url <URL>")
+                    return
+            
+            print(f"Syncing financial statements for {company.name} ({company.ticker_symbol})...")
+            result = sync_financial_statements_registry(company, url, db, parse_and_store=parse)
+            
+            print(f"\n[OK] Sync complete:")
+            print(f"   URL saved: {result['url_saved']}")
+            print(f"   PDFs downloaded: {result['pdfs_downloaded']}")
+            print(f"   PDFs parsed: {result['pdfs_parsed']}")
+            if result['errors']:
+                print(f"   Errors ({len(result['errors'])}):")
+                for err in result['errors'][:10]:
+                    print(f"     - {err}")
+        else:
+            print("[ERROR] Ticker required. Usage:")
+            print("    python -m cli.commands sync-financial-statements --ticker KCB --url <URL>")
+    finally:
+        db.close()
+
+
+def cmd_enrich_cash_flow(ticker: str = None, year_start: int = 2020, year_end: int = 2026):
+    """Enrich cash flow (OCF, CapEx, FCF) for companies from downloaded PDFs.
+    
+    Extracts operating cash flow and capital expenditures from annual reports,
+    then calculates and stores Free Cash Flow = OCF - CapEx.
+    
+    Usage:
+        python -m cli.commands enrich-cash-flow --ticker KCB
+        python -m cli.commands enrich-cash-flow --ticker KCB --year-start 2022 --year-end 2025
+    """
+    from app.data.cash_flow_enrichment import enrich_cash_flow_for_company
+    from app.models.company import Company
+    
+    db = SessionLocal()
+    try:
+        if not ticker:
+            print("[ERROR] Ticker required. Usage:")
+            print("    python -m cli.commands enrich-cash-flow --ticker KCB")
+            return
+        
+        company = db.query(Company).filter(Company.ticker_symbol == ticker.upper()).first()
+        if not company:
+            print(f"[ERROR] Company not found: {ticker}")
+            return
+        
+        print(f"Enriching cash flow for {company.name} ({company.ticker_symbol})...")
+        print(f"  Years: {year_start}-{year_end}\n")
+        
+        summary = enrich_cash_flow_for_company(
+            company,
+            year_start=year_start,
+            year_end=year_end,
+            db=db,
+        )
+        
+        print(f"[OK] Cash flow enrichment complete:")
+        print(f"   Years attempted: {summary['years_attempted']}")
+        print(f"   Successful (FCF calculated): {summary['years_successful']}")
+        print(f"   Partial (missing OCF or CapEx): {summary['years_partial']}")
+        print(f"   Failed: {summary['years_failed']}")
+        
+        print(f"\n  Detailed results:")
+        for result in summary['results']:
+            if result['status'] == 'ok':
+                print(f"    [OK] FY{result['fiscal_year']}: OCF={result['ocf']:.0f}, CapEx={result['capex']:.0f}, FCF={result['fcf']:.0f}")
+            elif result['status'] == 'partial':
+                if result['ocf']:
+                    print(f"    [~] FY{result['fiscal_year']}: OCF={result['ocf']:.0f} (CapEx missing)")
+                else:
+                    print(f"    [~] FY{result['fiscal_year']}: CapEx={result['capex']:.0f} (OCF missing)")
+            elif result['status'] == 'not_found':
+                print(f"    [-] FY{result['fiscal_year']}: Not yet parsed")
+            else:
+                print(f"    [X] FY{result['fiscal_year']}: {result['status']}")
+    finally:
+        db.close()
+
+
 def cmd_compute_valuations(ticker: str = None):
     """Compute intrinsic valuations for all companies (or a single ticker)."""
     from app.database import SessionLocal
@@ -535,6 +642,31 @@ def main():
         cmd_set_marketscreener_url(ticker=ticker, graphics_url=url)
     elif command == "sync-marketscreener-registry":
         cmd_sync_marketscreener_registry()
+    elif command == "sync-financial-statements":
+        ticker = None
+        parse = "--no-parse" not in sys.argv
+        if "--ticker" in sys.argv:
+            idx = sys.argv.index("--ticker")
+            if idx + 1 < len(sys.argv):
+                ticker = sys.argv[idx + 1]
+        cmd_sync_financial_statements(ticker=ticker, parse=parse)
+    elif command == "enrich-cash-flow":
+        ticker = None
+        year_start = 2020
+        year_end = 2026
+        if "--ticker" in sys.argv:
+            idx = sys.argv.index("--ticker")
+            if idx + 1 < len(sys.argv):
+                ticker = sys.argv[idx + 1]
+        if "--year-start" in sys.argv:
+            idx = sys.argv.index("--year-start")
+            if idx + 1 < len(sys.argv):
+                year_start = int(sys.argv[idx + 1])
+        if "--year-end" in sys.argv:
+            idx = sys.argv.index("--year-end")
+            if idx + 1 < len(sys.argv):
+                year_end = int(sys.argv[idx + 1])
+        cmd_enrich_cash_flow(ticker=ticker, year_start=year_start, year_end=year_end)
     elif command == "backfill-marketscreener":
         ticker = None
         delay = 2.0

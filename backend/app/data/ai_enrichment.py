@@ -23,6 +23,27 @@ from app.models.financial_statement import FinancialStatement
 
 logger = logging.getLogger(__name__)
 
+# NSE financial institutions have materially different cash-flow behavior and
+# statement layouts compared to industrial companies.
+FINANCIAL_TICKERS = {
+    "ABSA",
+    "BKGR",
+    "CARB",
+    "CFC",
+    "DTK",
+    "EQTY",
+    "HFCK",
+    "I&M",
+    "KCB",
+    "NBK",
+    "NCBA",
+    "SCBK",
+}
+
+
+def _is_financial_ticker(ticker: str) -> bool:
+    return (ticker or "").upper() in FINANCIAL_TICKERS
+
 # ---------------------------------------------------------------------------
 # Prompt Template
 # ---------------------------------------------------------------------------
@@ -66,11 +87,11 @@ flow characteristics from industrial companies. For banks:
   total assets. These are completely different figures.
 
 VALIDATION CONSTRAINTS — the LLM MUST self-check before responding:
-1. Free cash flow MUST be less than revenue. FCF > revenue is impossible.
+1. For non-financial companies, free cash flow should typically be less than
+    revenue. For banks/insurers, treat this check as advisory only.
 2. Free cash flow MUST equal (OCF - CapEx). If it doesn't, fix it.
-3. OCF should generally be < revenue for most companies. OCF > revenue \
-   is extremely rare and should only occur in exceptional circumstances.
-4. Net income should be < revenue. If not, re-check your figures.
+3. OCF should generally be < revenue for most non-financial companies.
+4. Net income should usually be < revenue for non-financial companies.
 5. CapEx should be a positive number and should be < 50% of revenue \
    for most companies.
 """
@@ -101,8 +122,8 @@ IMPORTANT: Report the EXACT values from the audited financial statements:
 
 SELF-CHECK before responding — for EACH year verify:
   ✓ FCF = OCF - CapEx  (must be mathematically exact)
-  ✓ FCF < Revenue  (FCF exceeding revenue is impossible)
-  ✓ Net income < Revenue
+    ✓ For non-financial companies: FCF < Revenue
+    ✓ For non-financial companies: Net income < Revenue
   ✓ OCF is reasonable relative to revenue (typically 10-40% for non-banks)
 
 Return ONLY a JSON object (no markdown fences, no explanation text):
@@ -152,6 +173,7 @@ def _call_openai(prompt: str, system: str, model: str | None = None) -> str:
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ],
+        response_format={"type": "json_object"},
         temperature=0.1,  # Low temperature for factual data
         max_tokens=4000,
     )
@@ -253,11 +275,17 @@ def _validate_financial_record(
     ocf = _safe_num(record.get("operating_cash_flow"))
     capex = _safe_num(record.get("capital_expenditures"))
     fcf = _safe_num(record.get("free_cash_flow"))
+    is_financial = _is_financial_ticker(ticker)
 
     issues: list[str] = []
 
     # --- Check 1: FCF > Revenue (impossible) --------------------------------
-    if fcf is not None and revenue is not None and revenue > 0:
+    if (
+        not is_financial
+        and fcf is not None
+        and revenue is not None
+        and revenue > 0
+    ):
         if fcf > revenue:
             issues.append(
                 f"FCF ({fcf:,.0f}) > Revenue ({revenue:,.0f}) — impossible, "
@@ -269,7 +297,12 @@ def _validate_financial_record(
             ocf = None
 
     # --- Check 2: OCF > 2× Revenue (highly suspicious) ----------------------
-    if ocf is not None and revenue is not None and revenue > 0:
+    if (
+        not is_financial
+        and ocf is not None
+        and revenue is not None
+        and revenue > 0
+    ):
         if ocf > revenue * 2.0:
             issues.append(
                 f"OCF ({ocf:,.0f}) > 2× Revenue ({revenue:,.0f}) — "
@@ -281,7 +314,12 @@ def _validate_financial_record(
             fcf = None
 
     # --- Check 3: Net income > Revenue (impossible) -------------------------
-    if net_income is not None and revenue is not None and revenue > 0:
+    if (
+        not is_financial
+        and net_income is not None
+        and revenue is not None
+        and revenue > 0
+    ):
         if net_income > revenue:
             issues.append(
                 f"Net income ({net_income:,.0f}) > Revenue ({revenue:,.0f}) — "
@@ -316,6 +354,8 @@ def _validate_financial_record(
     # --- Check 6: FCF > 1.5× Net Income (suspicious but not impossible) ----
     fcf = _safe_num(record.get("free_cash_flow"))
     if (
+        not is_financial
+        and
         fcf is not None
         and net_income is not None
         and net_income > 0

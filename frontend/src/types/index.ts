@@ -279,3 +279,45 @@ export interface CompanyNote {
   created_at: string;
   updated_at: string;
 }
+
+export interface CompanyChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface OnlineValidationSummary {
+  status: 'match' | 'mismatch' | 'partial' | 'unavailable';
+  source: string | null;
+  db_price_date: string | null;
+  db_close_price: number | null;
+  online_price_date: string | null;
+  online_close_price: number | null;
+  price_diff_pct: number | null;
+  note: string | null;
+}
+
+export interface CompanyChatContextMeta {
+  latest_db_price_date: string | null;
+  latest_valuation_date: string | null;
+  latest_financial_year: number | null;
+}
+
+export interface CompanyChatResponse {
+  answer: string;
+  company_ticker: string;
+  online_validation: OnlineValidationSummary;
+  context_meta: CompanyChatContextMeta;
+}
+
+export interface ChatHistoryItem {
+  id: number;
+  role: 'user' | 'assistant';
+  content: string;
+  created_at: string;
+}
+
+export interface ChatHistoryResponse {
+  company_id: number;
+  user_id: number;
+  messages: ChatHistoryItem[];
+}
