@@ -1,6 +1,6 @@
 # StockUp production stack (Azure VM).
 #
-# Bring up:   docker compose --env-file .env.production up -d
+# Bring up:   docker compose up -d --build      # compose auto-loads .env
 # Tail logs:  docker compose logs -f api worker beat
 # Migrate:    handled automatically on api startup
 # Backfill:   docker compose exec api python -m cli.commands backfill-prices
@@ -41,7 +41,7 @@ services:
     image: stockup-backend:latest
     restart: unless-stopped
     env_file:
-      - .env.production
+      - .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-stockup}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-stockup}
       REDIS_URL: redis://redis:6379/0
@@ -63,7 +63,7 @@ services:
       context: ./backend
     restart: unless-stopped
     env_file:
-      - .env.production
+      - .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-stockup}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-stockup}
       REDIS_URL: redis://redis:6379/0
@@ -84,7 +84,7 @@ services:
       context: ./backend
     restart: unless-stopped
     env_file:
-      - .env.production
+      - .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-stockup}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-stockup}
       REDIS_URL: redis://redis:6379/0

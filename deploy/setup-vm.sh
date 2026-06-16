@@ -56,7 +56,7 @@ cd "$REPO_DIR"
 echo ">>> git pull"
 git pull --ff-only
 echo ">>> docker compose up -d --build"
-docker compose --env-file .env.production up -d --build
+docker compose up -d --build
 echo ">>> done. Tail logs with:  docker compose logs -f api worker beat"
 EOF
 sudo chmod +x "$HELPER"
@@ -64,8 +64,8 @@ sudo chmod +x "$HELPER"
 echo
 echo "Done. Next steps:"
 echo "  1) git clone <your repo> ~/stockup && cd ~/stockup"
-echo "  2) cp .env.production.example .env.production && nano .env.production"
-echo "  3) docker compose --env-file .env.production up -d --build"
+echo "  2) cp .env.production.example .env && nano .env       # compose auto-loads '.env'"
+echo "  3) docker compose up -d --build"
 echo "  4) From your laptop:  ssh -i stockup.pem -L 8000:localhost:8000 azureuser@<vm-ip>"
 echo "     then open http://localhost:8000/docs"
 echo
