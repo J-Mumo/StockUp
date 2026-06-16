@@ -321,3 +321,55 @@ export interface ChatHistoryResponse {
   user_id: number;
   messages: ChatHistoryItem[];
 }
+
+export type GoalCategory = 'financial' | 'strategic' | 'esg' | 'operational';
+export type GoalStatus =
+  | 'achieved'
+  | 'on_track'
+  | 'partially_achieved'
+  | 'missed'
+  | 'abandoned'
+  | 'no_mention';
+export type AssessmentMethod = 'mechanical' | 'llm' | 'manual';
+export type GoalConfidence = 'high' | 'medium' | 'low';
+
+export interface CompanyGoalProgress {
+  id: number;
+  assessed_in_fiscal_year: number;
+  status: GoalStatus;
+  actual_value: number | null;
+  narrative: string | null;
+  evidence_quote: string | null;
+  confidence: GoalConfidence;
+  assessment_method: AssessmentMethod;
+  created_at: string;
+}
+
+export interface CompanyGoal {
+  id: number;
+  company_id: number;
+  fiscal_year_set: number;
+  goal_text: string;
+  goal_category: GoalCategory;
+  metric_name: string | null;
+  target_value: number | null;
+  target_unit: string | null;
+  target_horizon_year: number | null;
+  source_section: string | null;
+  source_quote: string | null;
+  created_at: string;
+  updated_at: string;
+  progress: CompanyGoalProgress[];
+}
+
+export interface GoalScorecardRow {
+  fiscal_year_set: number;
+  goals_total: number;
+  achieved: number;
+  on_track: number;
+  partially_achieved: number;
+  missed: number;
+  abandoned: number;
+  no_mention: number;
+  not_yet_assessed: number;
+}

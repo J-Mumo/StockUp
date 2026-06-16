@@ -1,0 +1,101 @@
+# StockUp production stack (Azure VM).
+#
+# Bring up:   docker compose --env-file .env.production up -d
+# Tail logs:  docker compose logs -f api worker beat
+# Migrate:    handled automatically on api startup
+# Backfill:   docker compose exec api python -m cli.commands backfill-prices
+
+name: stockup
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-stockup}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:-stockup}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-stockup} -d ${POSTGRES_DB:-stockup}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: ./backend
+    image: stockup-backend:latest
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-stockup}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-stockup}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Bind to loopback only — access from your laptop via SSH tunnel:
+    #   ssh -i stockup.pem -L 8000:localhost:8000 azureuser@<vm-ip>
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - app_data:/app/data
+
+  worker:
+    image: stockup-backend:latest
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-stockup}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-stockup}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    command: celery -A tasks.celery_app worker --loglevel=info --concurrency=2
+    volumes:
+      - app_data:/app/data
+
+  beat:
+    image: stockup-backend:latest
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-stockup}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-stockup}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    command: celery -A tasks.celery_app beat --loglevel=info
+
+volumes:
+  postgres_data:
+  redis_data:
+  app_data:

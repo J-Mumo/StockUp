@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 import { stocksApi, analysisApi, portfolioApi, notesApi, companyChatApi } from '../lib/services';
 import type { CompanyDetail, PriceHistory, FinancialStatement, IntrinsicValue, Recommendation, ValuationTrendPoint, Holding, Portfolio, CompanyNote, CompanyChatMessage, OnlineValidationSummary, CompanyChatContextMeta } from '../types';
 import { PageLoader } from '../components/ui/LoadingSpinner';
+import GoalsSection from '../components/GoalsSection';
 
 type TimePeriod = '1D' | '5D' | '1M' | '6M' | 'YTD' | '1Y' | '5Y' | 'ALL';
 
@@ -1189,6 +1190,9 @@ export default function CompanyDetailPage() {
           </div>
         </div>
       )}
+
+      {/* Management Goals Section */}
+      <GoalsSection companyId={companyId} />
 
       {/* Notes Section */}
       <div className="bg-dark-surface border border-dark-border rounded-xl p-6 mb-6">

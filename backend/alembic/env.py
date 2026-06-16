@@ -1,5 +1,6 @@
 """Alembic environment configuration."""
 
+import os
 import sys
 from pathlib import Path
 from logging.config import fileConfig
@@ -15,6 +16,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+# Allow DATABASE_URL env var to override alembic.ini (needed for containers/CI)
+_db_url = os.getenv("DATABASE_URL")
+if _db_url:
+    config.set_main_option("sqlalchemy.url", _db_url)
 
 # Interpret the config file for Python logging.
 if config.config_file_name is not None:

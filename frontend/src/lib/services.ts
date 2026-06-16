@@ -23,6 +23,8 @@ import type {
   CompanyChatMessage,
   CompanyChatResponse,
   ChatHistoryResponse,
+  CompanyGoal,
+  GoalScorecardRow,
 } from '../types';
 
 // Auth
@@ -162,4 +164,12 @@ export const companyChatApi = {
     api.post(`/stocks/companies/${companyId}/chat-history`, { messages }),
   getHistory: (companyId: number) =>
     api.get<ChatHistoryResponse>(`/stocks/companies/${companyId}/chat-history`),
+};
+
+// Company Goals
+export const goalsApi = {
+  list: (companyId: number) =>
+    api.get<CompanyGoal[]>(`/stocks/companies/${companyId}/goals`),
+  scorecard: (companyId: number) =>
+    api.get<GoalScorecardRow[]>(`/stocks/companies/${companyId}/goals/scorecard`),
 };

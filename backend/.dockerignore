@@ -1,0 +1,33 @@
+# Local-only files that should never enter the image
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Local data caches (mounted as volumes in compose instead)
+data/annual_reports/*
+data/marketscreener_prices/*
+data/tv_prices/*
+!data/annual_reports/.gitkeep
+!data/marketscreener_prices/.gitkeep
+!data/tv_prices/.gitkeep
+
+# Logs / scratch
+*.log
+_bat2014_raw.txt
+tmp_*.py
+inspect_html.py
+
+# OS junk
+.DS_Store
+Thumbs.db
