@@ -75,17 +75,27 @@ While that SSH session is open, on your laptop:
 
 ## 4. Day-to-day commands
 
-```bash
-# Update to latest code
-cd ~/stockup
-git pull
-docker compose --env-file .env.production up -d --build
+After any code push from your laptop, update the VM in one shot:
 
+```bash
+stockup-update
+```
+
+That alias (installed by `setup-vm.sh` at `/usr/local/bin/stockup-update`) does
+`git pull` + `docker compose up -d --build` against `~/stockup`. Override the
+directory with `STOCKUP_DIR=/path/to/repo stockup-update` if you cloned elsewhere.
+
+Other useful commands:
+
+```bash
 # Restart a single service
 docker compose restart worker
 
 # One-off shell
 docker compose exec api bash
+
+# Tail logs
+docker compose logs -f api worker beat
 
 # Stop everything (data persists in named volumes)
 docker compose down

@@ -22,9 +22,10 @@ StockUp helps you track NSE (Nairobi Securities Exchange) stock prices, calculat
 | Backend | Python 3.12, FastAPI, SQLAlchemy 2.x, Alembic |
 | Database | PostgreSQL 16 |
 | Cache/Broker | Redis |
-| Task Queue | Celery (solo pool on Windows) |
+| Task Queue | Celery (solo pool on Windows, prefork in production) |
 | Data Sources | Marketscreener (historical primary), NSE scraper (afx.kwayisi.org), yfinance, CSV archive |
 | Frontend | React 18 + TypeScript + Vite + TailwindCSS v4 + Recharts |
+| Deployment | Docker Compose on a single Azure VM (Ubuntu 24.04), API exposed via SSH tunnel |
 
 ## Quick Start
 
@@ -236,7 +237,12 @@ StockUp/
 │   │   └── types/               # TypeScript interfaces
 │   ├── package.json
 │   └── vite.config.ts
+├── deploy/
+│   ├── setup-vm.sh              # One-shot Azure VM bootstrap
+│   └── README.md                # Deployment guide
 ├── plans/                       # Architecture docs
+├── docker-compose.yml           # Production stack (api + worker + beat + postgres + redis)
+├── .env.production.example      # Template for production secrets
 ├── Makefile                     # Dev commands
 └── README.md
 ```
@@ -262,6 +268,62 @@ Data sources are used in priority order for backfilling:
 | Daily Price Fetch | 6:00 PM EAT | Fetch current prices for all companies |
 | Valuation Recalc | 7:00 PM EAT | Recalculate intrinsic values |
 | Alert Evaluation | 7:30 PM EAT | Check and trigger user alerts |
+
+## Deployment
+
+The project runs in production on a single Azure VM (Ubuntu 24.04 LTS, B2s) using
+Docker Compose. The API is bound to `127.0.0.1` only and accessed from a developer
+laptop via SSH tunnel — there is no public ingress.
+
+### Production stack (`docker-compose.yml`)
+
+| Service | Image | Role |
+|---------|-------|------|
+| `postgres` | `postgres:16-alpine` | Primary database, persisted to a named volume |
+| `redis` | `redis:7-alpine` | Celery broker + result backend |
+| `api` | built from `backend/Dockerfile` | FastAPI (auto-runs `alembic upgrade head` on start) |
+| `worker` | same image | Celery worker (`--concurrency=2`, prefork pool) |
+| `beat` | same image | Celery beat scheduler (EAT timezone) |
+
+The backend image is based on `mcr.microsoft.com/playwright/python:v1.52.0-jammy`
+so the Marketscreener adapter's chromium fallback works without extra setup.
+
+### Deployment files
+
+| File | Purpose |
+|------|---------|
+| `backend/Dockerfile` | Image used by `api`, `worker`, and `beat` |
+| `backend/.dockerignore` | Keeps venv, `.env`, and local PDF cache out of the build |
+| `docker-compose.yml` | Service definitions (API bound to `127.0.0.1:8000`) |
+| `.env.production.example` | Template for production secrets (copy to `.env.production` on the VM) |
+| `deploy/setup-vm.sh` | One-shot bootstrap: installs Docker, UFW, unattended-upgrades, `stockup-update` helper |
+| `deploy/README.md` | Step-by-step deployment, SSH tunnel, backups, cost control |
+
+### Pushing updates
+
+From your laptop, `git push`. On the VM, run:
+
+```bash
+stockup-update
+```
+
+That helper (installed by `deploy/setup-vm.sh`) runs `git pull` then
+`docker compose up -d --build` in `~/stockup`. Compose only rebuilds layers that
+changed, so most updates take seconds.
+
+### Accessing the API from your laptop
+
+```powershell
+ssh -i stockup.pem -L 8000:localhost:8000 azureuser@<vm-public-ip>
+```
+
+While that tunnel is open:
+- API docs → http://localhost:8000/docs
+- Local `npm run dev` in `frontend/` talks to the tunneled API on `localhost:8000`
+  (existing CORS config already allows `localhost:5173`).
+
+See `deploy/README.md` for full details including backups, seed/backfill commands,
+and cost-control tips.
 
 ## Milestones
 
