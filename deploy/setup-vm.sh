@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # One-shot bootstrap for a fresh Ubuntu 24.04 Azure VM.
-# Run as the default user (azureuser); script will sudo where needed.
+# Run as the default VM user (whatever you configured at VM creation —
+# StockUp's prod VM uses 'stockup'); script will sudo where needed.
 #
 # Usage on the VM:
 #   curl -fsSL https://raw.githubusercontent.com/<you>/stockup/main/deploy/setup-vm.sh | bash
@@ -66,7 +67,7 @@ echo "Done. Next steps:"
 echo "  1) git clone <your repo> ~/stockup && cd ~/stockup"
 echo "  2) cp .env.production.example .env && nano .env       # compose auto-loads '.env'"
 echo "  3) docker compose up -d --build"
-echo "  4) From your laptop:  ssh -i stockup.pem -L 8000:localhost:8000 azureuser@<vm-ip>"
+echo "  4) From your laptop:  ssh -i StockUpVM_key.pem -L 8000:localhost:8000 stockup@<vm-ip>"
 echo "     then open http://localhost:8000/docs"
 echo
 echo "After future code pushes, just run on the VM:  stockup-update"

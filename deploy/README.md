@@ -3,13 +3,36 @@
 Single-VM deployment running api + celery worker + celery beat + postgres + redis in
 Docker Compose. API binds to loopback only; access from your laptop via SSH tunnel.
 
+## Connection details (this deployment)
+
+| Field | Value |
+|---|---|
+| SSH user | `stockup` |
+| Public IP | `102.37.15.86` (Azure can change this if the VM is deallocated without a reserved IP) |
+| SSH key | `C:\Users\JOEL\Downloads\StockUpVM_key.pem` |
+| Repo path on VM | `~/stockup` |
+| Production env file | `~/stockup/.env` (literal `.env`, **not** `.env.production`) |
+
+Ready-to-paste shell:
+```powershell
+ssh -i C:\Users\JOEL\Downloads\StockUpVM_key.pem stockup@102.37.15.86
+```
+
+Ready-to-paste API tunnel (run before `npm run dev`):
+```powershell
+ssh -i C:\Users\JOEL\Downloads\StockUpVM_key.pem -L 8000:localhost:8000 stockup@102.37.15.86
+```
+
+> The generic instructions below use `<vm-ip>` as a placeholder so this doc stays
+> usable if the VM is ever rebuilt.
+
 ## 0. Prep your laptop
 
 The `.pem` you downloaded from Azure is your SSH key. Lock its permissions:
 
 ```powershell
-icacls stockup.pem /inheritance:r
-icacls stockup.pem /grant:r "$($env:USERNAME):(R)"
+icacls StockUpVM_key.pem /inheritance:r
+icacls StockUpVM_key.pem /grant:r "$($env:USERNAME):(R)"
 ```
 
 ## 1. First-time VM bootstrap
@@ -17,7 +40,7 @@ icacls stockup.pem /grant:r "$($env:USERNAME):(R)"
 SSH into the VM (replace IP):
 
 ```powershell
-ssh -i stockup.pem azureuser@<vm-public-ip>
+ssh -i StockUpVM_key.pem stockup@<vm-ip>
 ```
 
 On the VM:
@@ -70,7 +93,7 @@ Celery beat will then keep things fresh on the daily schedule defined in
 The API is bound to `127.0.0.1:8000` on the VM — not exposed publicly. Tunnel it:
 
 ```powershell
-ssh -i stockup.pem -L 8000:localhost:8000 azureuser@<vm-public-ip>
+ssh -i StockUpVM_key.pem -L 8000:localhost:8000 stockup@<vm-ip>
 ```
 
 While that SSH session is open, on your laptop:
@@ -114,9 +137,9 @@ docker compose down -v
 Nightly Postgres dump to the VM disk (rotate weekly). Add to crontab with `crontab -e`:
 
 ```cron
-0 2 * * * cd /home/azureuser/stockup && docker compose exec -T postgres \
-  pg_dump -U stockup stockup | gzip > /home/azureuser/backups/stockup-$(date +\%Y\%m\%d).sql.gz \
-  && find /home/azureuser/backups -name 'stockup-*.sql.gz' -mtime +7 -delete
+0 2 * * * cd /home/stockup/stockup && docker compose exec -T postgres \
+  pg_dump -U stockup stockup | gzip > /home/stockup/backups/stockup-$(date +\%Y\%m\%d).sql.gz \
+  && find /home/stockup/backups -name 'stockup-*.sql.gz' -mtime +7 -delete
 ```
 
 For off-VM backup, push the latest dump to Azure Blob Storage (Cool tier, ~$0.01/GB/mo)
@@ -143,7 +166,7 @@ If `pg_dump` isn't on PATH, full path is `C:\Program Files\PostgreSQL\16\bin\pg_
 Copy to the VM:
 
 ```powershell
-scp -i stockup.pem stockup.dump azureuser@<vm-ip>:~/stockup.dump
+scp -i StockUpVM_key.pem stockup.dump stockup@<vm-ip>:~/stockup.dump
 ```
 
 ### Import into the VM's container
@@ -231,7 +254,7 @@ The Vite dev server proxies `/api/*` to `http://localhost:8000`. Open the SSH
 tunnel from your laptop first:
 
 ```powershell
-ssh -i stockup.pem -L 8000:localhost:8000 azureuser@<vm-ip>
+ssh -i StockUpVM_key.pem -L 8000:localhost:8000 stockup@<vm-ip>
 ```
 
 Verify with `curl http://localhost:8000/health` before retrying `npm run dev`.

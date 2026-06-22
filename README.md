@@ -314,7 +314,7 @@ changed, so most updates take seconds.
 ### Accessing the API from your laptop
 
 ```powershell
-ssh -i stockup.pem -L 8000:localhost:8000 azureuser@<vm-public-ip>
+ssh -i StockUpVM_key.pem -L 8000:localhost:8000 stockup@<vm-public-ip>
 ```
 
 While that tunnel is open:

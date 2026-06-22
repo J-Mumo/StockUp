@@ -51,7 +51,7 @@ services:
       redis:
         condition: service_healthy
     # Bind to loopback only — access from your laptop via SSH tunnel:
-    #   ssh -i stockup.pem -L 8000:localhost:8000 azureuser@<vm-ip>
+    #   ssh -i StockUpVM_key.pem -L 8000:localhost:8000 stockup@<vm-ip>
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
