@@ -77,26 +77,21 @@ celery_app.conf.beat_schedule = {
     "daily-price-fetch": {
         "task": "tasks.price_tasks.fetch_all_prices",
         "schedule": crontab(hour=15, minute=0),  # 6PM EAT
-        "options": {"queue": "default"},
     },
     "daily-valuation-recalc": {
         "task": "tasks.valuation_tasks.recalculate_all_valuations",
         "schedule": crontab(hour=16, minute=0),  # 7PM EAT
-        "options": {"queue": "default"},
     },
     "daily-alert-evaluation": {
         "task": "tasks.alert_tasks.evaluate_all_alerts",
         "schedule": crontab(hour=16, minute=30),  # 7:30PM EAT
-        "options": {"queue": "default"},
     },
     "monthly-financials-refresh": {
         "task": "tasks.valuation_tasks.refresh_all_financials",
         "schedule": crontab(hour=23, minute=0, day_of_month="1"),  # 1st of month, 2AM EAT (23:00 UTC prev day)
-        "options": {"queue": "default"},
     },
     "monthly-annual-report-parsing": {
         "task": "tasks.valuation_tasks.parse_annual_reports",
         "schedule": crontab(hour=0, minute=0, day_of_month="5"),  # 5th of month, 3AM EAT (00:00 UTC)
-        "options": {"queue": "default"},
     },
 }
