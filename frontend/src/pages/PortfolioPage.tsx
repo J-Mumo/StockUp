@@ -29,13 +29,18 @@ interface EditTransactionForm {
 
 // NSE Kenya standard trading charges (% of gross consideration).
 // Brokerage commission is broker-specific (NCBA = 1.76%) and editable.
-const NSE_STATUTORY_RATE = 0.0008 + 0.0012 + 0.0001 + 0.0012 + 0.0001 + 0.0005; // 0.39%
+// Statutory levies: CDSC 0.08% + CMA 0.12% + CDSC guarantee 0.01% + NSE 0.12% + CMA guarantee 0.01% = 0.34%.
+// Stamp duty observed on NCBA contracts: ~0.02% of gross with a KES 6 minimum.
+const NSE_STATUTORY_RATE = 0.0008 + 0.0012 + 0.0001 + 0.0012 + 0.0001; // 0.34%
+const STAMP_DUTY_RATE = 0.0002;
+const STAMP_DUTY_MIN = 6;
 const DEFAULT_BROKERAGE_RATE = 0.0176; // 1.76%
 
 function computeNseCharges(gross: number, brokerageRate: number): number {
   if (!gross || gross <= 0) return 0;
-  const total = gross * (brokerageRate + NSE_STATUTORY_RATE);
-  return Math.round(total * 100) / 100;
+  const percentCharges = gross * (brokerageRate + NSE_STATUTORY_RATE);
+  const stampDuty = Math.max(STAMP_DUTY_MIN, Math.round(gross * STAMP_DUTY_RATE));
+  return Math.round((percentCharges + stampDuty) * 100) / 100;
 }
 
 export default function PortfolioPage() {
