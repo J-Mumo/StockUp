@@ -180,6 +180,33 @@ export interface PortfolioPerformance {
   allocations: { company_id: number; company_name: string; company_ticker: string; current_value: number; allocation_pct: number }[];
 }
 
+export interface RealizedPosition {
+  company_id: number;
+  company_name: string;
+  company_ticker: string;
+  quantity_sold: number;
+  remaining_shares: number;
+  avg_buy_price: number;
+  avg_sell_price: number;
+  total_buy_cost: number;
+  total_sell_proceeds: number;
+  realized_fees: number;
+  realized_pnl: number;
+  realized_pnl_pct: number;
+  first_buy_date: string | null;
+  last_sell_date: string | null;
+  fully_closed: boolean;
+}
+
+export interface RealizedListResponse {
+  portfolio_id: number;
+  portfolio_name: string;
+  positions: RealizedPosition[];
+  total_realized_pnl: number;
+  total_realized_proceeds: number;
+  total_realized_cost: number;
+}
+
 export interface Alert {
   id: number;
   user_id: number;

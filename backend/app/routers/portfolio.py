@@ -35,6 +35,8 @@ from app.schemas.portfolio import (
     PortfolioCreate,
     PortfolioResponse,
     PortfolioUpdate,
+    RealizedListResponse,
+    RealizedPositionResponse,
     TransactionCreate,
     TransactionResponse,
     TransactionUpdate,
@@ -366,6 +368,91 @@ def get_holdings(
 
 
 # ---------------------------------------------------------------------------
+# Realized positions (closed / partially-closed)
+# ---------------------------------------------------------------------------
+
+@router.get("/{portfolio_id}/realized", response_model=RealizedListResponse)
+def get_realized_positions(
+    portfolio_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Per-company realized P&L for sold shares (closed or partially closed)."""
+    portfolio = _get_user_portfolio(db, portfolio_id, current_user.id)
+
+    transactions = (
+        db.query(PortfolioTransaction)
+        .filter(PortfolioTransaction.portfolio_id == portfolio_id)
+        .order_by(PortfolioTransaction.transaction_date)
+        .all()
+    )
+
+    realized_by_company = _calculate_realized_by_company(transactions)
+    if not realized_by_company:
+        return RealizedListResponse(
+            portfolio_id=portfolio.id,
+            portfolio_name=portfolio.name,
+        )
+
+    company_ids = list(realized_by_company.keys())
+    companies = {
+        c.id: c for c in db.query(Company).filter(Company.id.in_(company_ids)).all()
+    }
+
+    positions: list[RealizedPositionResponse] = []
+    total_pnl = 0.0
+    total_proceeds = 0.0
+    total_cost = 0.0
+
+    for cid, data in realized_by_company.items():
+        company = companies.get(cid)
+        if company is None or data["quantity_sold"] <= 0:
+            continue
+
+        cost = data["total_buy_cost"]
+        proceeds = data["total_sell_proceeds"]
+        fees = data["realized_fees"]
+        pnl = proceeds - cost - fees
+        denom = cost + max(data["prorated_buy_fees"], 0)
+        pct = (pnl / denom * 100) if denom > 0 else 0.0
+        avg_buy = (cost / data["quantity_sold"]) if data["quantity_sold"] > 0 else 0.0
+        avg_sell = (proceeds / data["quantity_sold"]) if data["quantity_sold"] > 0 else 0.0
+
+        positions.append(RealizedPositionResponse(
+            company_id=cid,
+            company_name=company.name,
+            company_ticker=company.ticker_symbol,
+            quantity_sold=data["quantity_sold"],
+            remaining_shares=data["remaining_shares"],
+            avg_buy_price=avg_buy,
+            avg_sell_price=avg_sell,
+            total_buy_cost=cost,
+            total_sell_proceeds=proceeds,
+            realized_fees=fees,
+            realized_pnl=pnl,
+            realized_pnl_pct=pct,
+            first_buy_date=data["first_buy_date"],
+            last_sell_date=data["last_sell_date"],
+            fully_closed=data["remaining_shares"] <= 0,
+        ))
+        total_pnl += pnl
+        total_proceeds += proceeds
+        total_cost += cost
+
+    # Sort by absolute realized P&L impact, biggest first
+    positions.sort(key=lambda p: abs(p.realized_pnl), reverse=True)
+
+    return RealizedListResponse(
+        portfolio_id=portfolio.id,
+        portfolio_name=portfolio.name,
+        positions=positions,
+        total_realized_pnl=total_pnl,
+        total_realized_proceeds=total_proceeds,
+        total_realized_cost=total_cost,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Performance (Step 39)
 # ---------------------------------------------------------------------------
 
@@ -603,6 +690,91 @@ def _calculate_realized_pnl(transactions: list[PortfolioTransaction]) -> float:
                     h["avg_cost"] = 0.0
 
     return realized
+
+
+def _calculate_realized_by_company(
+    transactions: list[PortfolioTransaction],
+) -> dict[int, dict]:
+    """Per-company realized aggregates using weighted-average cost basis.
+
+    For each company:
+      - quantity_sold, total_buy_cost (basis of sold shares), total_sell_proceeds
+      - realized_fees = all sell fees + buys' fees prorated by qty_sold/qty_bought
+      - remaining_shares, first_buy_date, last_sell_date
+    """
+    state: dict[int, dict] = defaultdict(lambda: {
+        # running position
+        "shares": 0.0,
+        "avg_cost": 0.0,
+        "total_cost": 0.0,
+        # accumulators
+        "quantity_sold": 0.0,
+        "total_buy_cost": 0.0,
+        "total_sell_proceeds": 0.0,
+        "sell_fees": 0.0,
+        "total_buy_fees": 0.0,
+        "total_bought": 0.0,
+        "first_buy_date": None,
+        "last_sell_date": None,
+    })
+
+    for txn in sorted(transactions, key=lambda t: t.transaction_date):
+        cid = txn.company_id
+        qty = float(txn.quantity)
+        price = float(txn.price_per_share)
+        fees = float(txn.fees or 0)
+        s = state[cid]
+
+        if txn.transaction_type == "buy":
+            if s["first_buy_date"] is None:
+                s["first_buy_date"] = txn.transaction_date
+            new_cost = qty * price
+            total_shares = s["shares"] + qty
+            if total_shares > 0:
+                s["total_cost"] = s["total_cost"] + new_cost
+                s["avg_cost"] = s["total_cost"] / total_shares
+            s["shares"] = total_shares
+            s["total_buy_fees"] += fees
+            s["total_bought"] += qty
+
+        elif txn.transaction_type == "sell":
+            if s["shares"] <= 0:
+                continue
+            sell_qty = min(qty, s["shares"])
+            cost_of_sold = sell_qty * s["avg_cost"]
+            s["quantity_sold"] += sell_qty
+            s["total_buy_cost"] += cost_of_sold
+            s["total_sell_proceeds"] += sell_qty * price
+            s["sell_fees"] += fees
+            s["last_sell_date"] = txn.transaction_date
+            # reduce position
+            s["shares"] -= sell_qty
+            s["total_cost"] -= cost_of_sold
+            if s["shares"] <= 0:
+                s["shares"] = 0.0
+                s["total_cost"] = 0.0
+                s["avg_cost"] = 0.0
+
+    # Finalize: compute prorated buy fees + realized_fees and drop pure-buy positions
+    result: dict[int, dict] = {}
+    for cid, s in state.items():
+        if s["quantity_sold"] <= 0:
+            continue
+        prorated_buy_fees = (
+            s["total_buy_fees"] * (s["quantity_sold"] / s["total_bought"])
+            if s["total_bought"] > 0 else 0.0
+        )
+        result[cid] = {
+            "quantity_sold": s["quantity_sold"],
+            "remaining_shares": s["shares"],
+            "total_buy_cost": s["total_buy_cost"],
+            "total_sell_proceeds": s["total_sell_proceeds"],
+            "prorated_buy_fees": prorated_buy_fees,
+            "realized_fees": s["sell_fees"] + prorated_buy_fees,
+            "first_buy_date": s["first_buy_date"],
+            "last_sell_date": s["last_sell_date"],
+        }
+    return result
 
 
 def _get_latest_prices(db: Session, company_ids: list[int]) -> dict[int, float]:

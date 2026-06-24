@@ -149,5 +149,38 @@ class AllocationItem(BaseModel):
     allocation_pct: float
 
 
+# ---------------------------------------------------------------------------
+# Realized positions (closed / partially-closed)
+# ---------------------------------------------------------------------------
+
+class RealizedPositionResponse(BaseModel):
+    """Aggregated realized P&L for a single company within a portfolio."""
+    company_id: int
+    company_name: str
+    company_ticker: str
+    quantity_sold: float
+    remaining_shares: float
+    avg_buy_price: float          # weighted-avg cost basis of the sold portion
+    avg_sell_price: float         # weighted-avg sell price
+    total_buy_cost: float         # cost basis of sold shares (qty × avg_buy_price)
+    total_sell_proceeds: float    # gross sale value
+    realized_fees: float          # sell fees + prorated buy fees
+    realized_pnl: float           # proceeds − cost − realized_fees
+    realized_pnl_pct: float       # pnl ÷ (cost + prorated buy fees) × 100
+    first_buy_date: date | None = None
+    last_sell_date: date | None = None
+    fully_closed: bool
+
+
+class RealizedListResponse(BaseModel):
+    """All realized positions for a portfolio."""
+    portfolio_id: int
+    portfolio_name: str
+    positions: list[RealizedPositionResponse] = []
+    total_realized_pnl: float = 0
+    total_realized_proceeds: float = 0
+    total_realized_cost: float = 0
+
+
 # Fix forward reference
 PerformanceResponse.model_rebuild()

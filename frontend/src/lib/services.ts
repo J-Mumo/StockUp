@@ -13,6 +13,7 @@ import type {
   Holding,
   HoldingsListResponse,
   PortfolioPerformance,
+  RealizedListResponse,
   Alert,
   Watchlist,
   WatchlistItem,
@@ -98,6 +99,7 @@ export const portfolioApi = {
     notes?: string;
   }) => api.post<Transaction>(`/portfolio/${id}/transactions`, data),
   getHoldings: (id: number) => api.get<HoldingsListResponse>(`/portfolio/${id}/holdings`),
+  getRealized: (id: number) => api.get<RealizedListResponse>(`/portfolio/${id}/realized`),
   getPerformance: (id: number) => api.get<PortfolioPerformance>(`/portfolio/${id}/performance`),
   updateTransaction: (portfolioId: number, transactionId: number, data: {
     transaction_type?: 'buy' | 'sell';

@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form';
 import { Plus, Briefcase, TrendingUp, TrendingDown, X, Pencil, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { portfolioApi, stocksApi } from '../lib/services';
-import type { Portfolio, Holding, HoldingsListResponse, Transaction, PortfolioPerformance, Company } from '../types';
+import type { Portfolio, Holding, HoldingsListResponse, Transaction, PortfolioPerformance, Company, RealizedListResponse, RealizedPosition } from '../types';
 import { SkeletonCard, PageLoader } from '../components/ui/LoadingSpinner';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -49,6 +49,7 @@ export default function PortfolioPage() {
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [performance, setPerformance] = useState<PortfolioPerformance | null>(null);
+  const [realized, setRealized] = useState<RealizedListResponse | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreatePortfolio, setShowCreatePortfolio] = useState(false);
@@ -89,14 +90,16 @@ export default function PortfolioPage() {
     setSelectedPortfolio(portfolio);
     setLoading(true);
     try {
-      const [holdingsRes, transRes, perfRes] = await Promise.all([
+      const [holdingsRes, transRes, perfRes, realizedRes] = await Promise.all([
         portfolioApi.getHoldings(portfolio.id),
         portfolioApi.getTransactions(portfolio.id),
         portfolioApi.getPerformance(portfolio.id),
+        portfolioApi.getRealized(portfolio.id),
       ]);
       setHoldings(holdingsRes.data.holdings);
       setTransactions(transRes.data);
       setPerformance(perfRes.data);
+      setRealized(realizedRes.data);
     } catch {
       toast.error('Failed to load portfolio data');
     } finally {
@@ -148,7 +151,7 @@ export default function PortfolioPage() {
       const remaining = portfolios.filter((p) => p.id !== id);
       setPortfolios(remaining);
       if (remaining.length > 0) selectPortfolio(remaining[0]);
-      else { setSelectedPortfolio(null); setHoldings([]); setTransactions([]); setPerformance(null); }
+      else { setSelectedPortfolio(null); setHoldings([]); setTransactions([]); setPerformance(null); setRealized(null); }
       toast.success('Portfolio deleted');
     } catch {
       toast.error('Failed to delete portfolio');
@@ -372,6 +375,77 @@ export default function PortfolioPage() {
               </>
             )}
           </div>
+
+          {/* Realized Positions (closed / partially-closed) */}
+          {realized && realized.positions.length > 0 && (
+            <div className="bg-dark-surface border border-dark-border rounded-xl p-6 mb-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-white">Realized P&amp;L</h2>
+                <div className="text-right">
+                  <p className="text-xs text-gray-400">Total realized</p>
+                  <p className={`text-base font-semibold ${realized.total_realized_pnl >= 0 ? 'text-gain' : 'text-loss'}`}>
+                    {realized.total_realized_pnl >= 0 ? '+' : ''}{formatCurrency(realized.total_realized_pnl)}
+                  </p>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="text-left text-sm text-gray-400 border-b border-dark-border">
+                      <th className="pb-3 font-medium">Company</th>
+                      <th className="pb-3 font-medium text-right">Shares Sold</th>
+                      <th className="pb-3 font-medium text-right">Avg Buy</th>
+                      <th className="pb-3 font-medium text-right">Avg Sell</th>
+                      <th className="pb-3 font-medium text-right">Cost</th>
+                      <th className="pb-3 font-medium text-right">Proceeds</th>
+                      <th className="pb-3 font-medium text-right">Charges</th>
+                      <th className="pb-3 font-medium text-right">P&amp;L</th>
+                      <th className="pb-3 font-medium text-right">Return</th>
+                      <th className="pb-3 font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {realized.positions.map((r: RealizedPosition) => (
+                      <tr key={r.company_id} className="border-b border-dark-border/50">
+                        <td className="py-3">
+                          <Link to={`/companies/${r.company_id}`} className="hover:text-primary-400 transition-colors">
+                            <p className="text-white font-medium">{r.company_name}</p>
+                            <p className="text-xs text-gray-500">
+                              {r.company_ticker}
+                              {r.first_buy_date && r.last_sell_date && (
+                                <span className="ml-1">· {r.first_buy_date} → {r.last_sell_date}</span>
+                              )}
+                            </p>
+                          </Link>
+                        </td>
+                        <td className="py-3 text-right text-gray-300">{r.quantity_sold}</td>
+                        <td className="py-3 text-right text-gray-300">{r.avg_buy_price.toFixed(2)}</td>
+                        <td className="py-3 text-right text-gray-300">{r.avg_sell_price.toFixed(2)}</td>
+                        <td className="py-3 text-right text-gray-400">{formatCurrency(r.total_buy_cost)}</td>
+                        <td className="py-3 text-right text-gray-400">{formatCurrency(r.total_sell_proceeds)}</td>
+                        <td className="py-3 text-right text-gray-400">{r.realized_fees > 0 ? formatCurrency(r.realized_fees) : '—'}</td>
+                        <td className={`py-3 text-right font-medium ${r.realized_pnl >= 0 ? 'text-gain' : 'text-loss'}`}>
+                          {r.realized_pnl >= 0 ? '+' : ''}{formatCurrency(r.realized_pnl)}
+                        </td>
+                        <td className={`py-3 text-right font-medium ${r.realized_pnl_pct >= 0 ? 'text-gain' : 'text-loss'}`}>
+                          {r.realized_pnl_pct >= 0 ? '+' : ''}{r.realized_pnl_pct.toFixed(2)}%
+                        </td>
+                        <td className="py-3">
+                          {r.fully_closed ? (
+                            <span className="text-xs px-2 py-0.5 rounded bg-dark-bg border border-dark-border text-gray-300">Closed</span>
+                          ) : (
+                            <span className="text-xs px-2 py-0.5 rounded bg-dark-bg border border-dark-border text-primary-400">
+                              {r.remaining_shares} left
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Transaction History */}
           <div className="bg-dark-surface border border-dark-border rounded-xl p-6 mb-6">
