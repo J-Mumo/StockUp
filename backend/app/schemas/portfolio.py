@@ -67,6 +67,7 @@ class TransactionUpdate(BaseModel):
     transaction_type: str | None = Field(None, pattern=r"^(buy|sell)$")
     quantity: float | None = Field(None, gt=0)
     price_per_share: float | None = Field(None, gt=0)
+    fees: float | None = Field(None, ge=0)
     transaction_date: date | None = None
     notes: str | None = None
 

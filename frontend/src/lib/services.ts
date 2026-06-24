@@ -93,6 +93,7 @@ export const portfolioApi = {
     transaction_type: 'buy' | 'sell';
     quantity: number;
     price_per_share: number;
+    fees?: number;
     transaction_date: string;
     notes?: string;
   }) => api.post<Transaction>(`/portfolio/${id}/transactions`, data),
@@ -102,6 +103,7 @@ export const portfolioApi = {
     transaction_type?: 'buy' | 'sell';
     quantity?: number;
     price_per_share?: number;
+    fees?: number;
     transaction_date?: string;
     notes?: string;
   }) => api.put<Transaction>(`/portfolio/${portfolioId}/transactions/${transactionId}`, data),

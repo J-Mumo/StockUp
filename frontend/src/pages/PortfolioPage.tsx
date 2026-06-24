@@ -13,6 +13,7 @@ interface TransactionForm {
   transaction_type: 'buy' | 'sell';
   shares: number;
   price_per_share: number;
+  fees: number;
   transaction_date: string;
   notes: string;
 }
@@ -21,8 +22,20 @@ interface EditTransactionForm {
   transaction_type: 'buy' | 'sell';
   quantity: number;
   price_per_share: number;
+  fees: number;
   transaction_date: string;
   notes: string;
+}
+
+// NSE Kenya standard trading charges (% of gross consideration).
+// Brokerage commission is broker-specific (NCBA = 1.76%) and editable.
+const NSE_STATUTORY_RATE = 0.0008 + 0.0012 + 0.0001 + 0.0012 + 0.0001 + 0.0005; // 0.39%
+const DEFAULT_BROKERAGE_RATE = 0.0176; // 1.76%
+
+function computeNseCharges(gross: number, brokerageRate: number): number {
+  if (!gross || gross <= 0) return 0;
+  const total = gross * (brokerageRate + NSE_STATUTORY_RATE);
+  return Math.round(total * 100) / 100;
 }
 
 export default function PortfolioPage() {
@@ -38,13 +51,15 @@ export default function PortfolioPage() {
   const [newPortfolioName, setNewPortfolioName] = useState('');
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
 
-  const { register, handleSubmit, reset, setValue } = useForm<TransactionForm>({
-    defaultValues: { transaction_type: 'buy', transaction_date: new Date().toISOString().split('T')[0] },
+  const { register, handleSubmit, reset, setValue, watch } = useForm<TransactionForm>({
+    defaultValues: { transaction_type: 'buy', transaction_date: new Date().toISOString().split('T')[0], fees: 0 },
   });
-  const { register: registerEdit, handleSubmit: handleEditSubmit, reset: resetEdit, setValue: setEditValue } = useForm<EditTransactionForm>();
+  const { register: registerEdit, handleSubmit: handleEditSubmit, reset: resetEdit, setValue: setEditValue, watch: watchEdit } = useForm<EditTransactionForm>();
   const [companySearch, setCompanySearch] = useState('');
   const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false);
   const [selectedCompanyLabel, setSelectedCompanyLabel] = useState('');
+  const [brokerageRate, setBrokerageRate] = useState(DEFAULT_BROKERAGE_RATE * 100); // shown as %
+  const [editBrokerageRate, setEditBrokerageRate] = useState(DEFAULT_BROKERAGE_RATE * 100);
 
   useEffect(() => {
     loadPortfolios();
@@ -106,6 +121,7 @@ export default function PortfolioPage() {
         transaction_type: data.transaction_type,
         quantity: Number(data.shares),
         price_per_share: Number(data.price_per_share),
+        fees: Number(data.fees) || 0,
         transaction_date: data.transaction_date,
         notes: data.notes || undefined,
       });
@@ -152,6 +168,7 @@ export default function PortfolioPage() {
       transaction_type: t.transaction_type as 'buy' | 'sell',
       quantity: t.quantity,
       price_per_share: t.price_per_share,
+      fees: t.fees ?? 0,
       transaction_date: t.transaction_date,
       notes: t.notes || '',
     });
@@ -164,6 +181,7 @@ export default function PortfolioPage() {
         transaction_type: data.transaction_type,
         quantity: Number(data.quantity),
         price_per_share: Number(data.price_per_share),
+        fees: Number(data.fees) || 0,
         transaction_date: data.transaction_date,
         notes: data.notes || undefined,
       });
@@ -245,10 +263,20 @@ export default function PortfolioPage() {
         <>
           {/* Performance Summary */}
           {performance && (
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
               <div className="bg-dark-surface border border-dark-border rounded-xl p-4">
-                <p className="text-sm text-gray-400">Total Invested</p>
+                <p className="text-sm text-gray-400">Cost of Shares</p>
                 <p className="text-xl font-bold text-white">{formatCurrency(performance.total_invested)}</p>
+              </div>
+              <div className="bg-dark-surface border border-dark-border rounded-xl p-4">
+                <p className="text-sm text-gray-400">Total Charges</p>
+                <p className="text-xl font-bold text-white">{formatCurrency(performance.total_fees_paid ?? 0)}</p>
+              </div>
+              <div className="bg-dark-surface border border-dark-border rounded-xl p-4">
+                <p className="text-sm text-gray-400">Net Cost</p>
+                <p className="text-xl font-bold text-white">
+                  {formatCurrency((performance.total_invested ?? 0) + (performance.total_fees_paid ?? 0))}
+                </p>
               </div>
               <div className="bg-dark-surface border border-dark-border rounded-xl p-4">
                 <p className="text-sm text-gray-400">Current Value</p>
@@ -355,48 +383,56 @@ export default function PortfolioPage() {
                       <th className="pb-3 font-medium">Company</th>
                       <th className="pb-3 font-medium text-right">Shares</th>
                       <th className="pb-3 font-medium text-right">Price</th>
-                      <th className="pb-3 font-medium text-right">Total</th>
+                      <th className="pb-3 font-medium text-right">Gross</th>
+                      <th className="pb-3 font-medium text-right">Charges</th>
+                      <th className="pb-3 font-medium text-right">Net</th>
                       <th className="pb-3 font-medium text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {transactions.map((t) => (
-                      <tr key={t.id} className="border-b border-dark-border/50 group">
-                        <td className="py-3 text-gray-300">{t.transaction_date}</td>
-                        <td className="py-3">
-                          <span className={`flex items-center gap-1 ${t.transaction_type === 'buy' ? 'text-gain' : 'text-loss'}`}>
-                            {t.transaction_type === 'buy' ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-                            {t.transaction_type.toUpperCase()}
-                          </span>
-                        </td>
-                        <td className="py-3">
-                          <Link to={`/companies/${t.company_id}`} className="text-white hover:text-primary-400 transition-colors">
-                            {t.company_name || t.company_ticker || `Company #${t.company_id}`}
-                          </Link>
-                        </td>
-                        <td className="py-3 text-right text-gray-300">{t.quantity}</td>
-                        <td className="py-3 text-right text-gray-300">{t.price_per_share.toFixed(2)}</td>
-                        <td className="py-3 text-right text-gray-300">{formatCurrency(t.total_amount)}</td>
-                        <td className="py-3 text-right">
-                          <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button
-                              onClick={() => openEditTransaction(t)}
-                              className="p-1.5 text-gray-400 hover:text-primary-400 hover:bg-dark-border/50 rounded-md transition-colors"
-                              title="Edit transaction"
-                            >
-                              <Pencil size={14} />
-                            </button>
-                            <button
-                              onClick={() => deleteTransaction(t.id)}
-                              className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-dark-border/50 rounded-md transition-colors"
-                              title="Delete transaction"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    {transactions.map((t) => {
+                      const fees = t.fees ?? 0;
+                      const net = t.transaction_type === 'buy' ? t.total_amount + fees : t.total_amount - fees;
+                      return (
+                        <tr key={t.id} className="border-b border-dark-border/50 group">
+                          <td className="py-3 text-gray-300">{t.transaction_date}</td>
+                          <td className="py-3">
+                            <span className={`flex items-center gap-1 ${t.transaction_type === 'buy' ? 'text-gain' : 'text-loss'}`}>
+                              {t.transaction_type === 'buy' ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                              {t.transaction_type.toUpperCase()}
+                            </span>
+                          </td>
+                          <td className="py-3">
+                            <Link to={`/companies/${t.company_id}`} className="text-white hover:text-primary-400 transition-colors">
+                              {t.company_name || t.company_ticker || `Company #${t.company_id}`}
+                            </Link>
+                          </td>
+                          <td className="py-3 text-right text-gray-300">{t.quantity}</td>
+                          <td className="py-3 text-right text-gray-300">{t.price_per_share.toFixed(2)}</td>
+                          <td className="py-3 text-right text-gray-300">{formatCurrency(t.total_amount)}</td>
+                          <td className="py-3 text-right text-gray-400">{fees > 0 ? formatCurrency(fees) : '—'}</td>
+                          <td className="py-3 text-right text-white font-medium">{formatCurrency(net)}</td>
+                          <td className="py-3 text-right">
+                            <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button
+                                onClick={() => openEditTransaction(t)}
+                                className="p-1.5 text-gray-400 hover:text-primary-400 hover:bg-dark-border/50 rounded-md transition-colors"
+                                title="Edit transaction"
+                              >
+                                <Pencil size={14} />
+                              </button>
+                              <button
+                                onClick={() => deleteTransaction(t.id)}
+                                className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-dark-border/50 rounded-md transition-colors"
+                                title="Delete transaction"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -518,6 +554,53 @@ export default function PortfolioPage() {
                     </div>
                   </div>
                   <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-sm text-gray-300">Charges / Fees</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={brokerageRate}
+                          onChange={(e) => setBrokerageRate(Number(e.target.value))}
+                          className="w-16 px-2 py-1 bg-dark-bg border border-dark-border rounded text-xs text-white text-right"
+                          title="Brokerage commission %"
+                        />
+                        <span className="text-xs text-gray-500">% broker</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const gross = Number(watch('shares') || 0) * Number(watch('price_per_share') || 0);
+                            setValue('fees', computeNseCharges(gross, brokerageRate / 100));
+                          }}
+                          className="px-2 py-1 text-xs bg-dark-bg border border-dark-border text-primary-400 hover:text-primary-300 rounded"
+                        >
+                          Auto NSE
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="number"
+                      step="0.01"
+                      {...register('fees')}
+                      className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      placeholder="0.00"
+                    />
+                    {(() => {
+                      const gross = Number(watch('shares') || 0) * Number(watch('price_per_share') || 0);
+                      const fees = Number(watch('fees') || 0);
+                      const isBuy = watch('transaction_type') === 'buy';
+                      const net = isBuy ? gross + fees : gross - fees;
+                      if (gross <= 0) return null;
+                      return (
+                        <div className="mt-2 text-xs text-gray-400 flex justify-between">
+                          <span>Gross: <span className="text-gray-200">{formatCurrency(gross)}</span></span>
+                          <span>Charges: <span className="text-gray-200">{formatCurrency(fees)}</span></span>
+                          <span>{isBuy ? 'Net payable' : 'Net received'}: <span className="text-white font-semibold">{formatCurrency(net)}</span></span>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                  <div>
                     <label className="block text-sm text-gray-300 mb-1">Notes (optional)</label>
                     <input
                       type="text"
@@ -588,6 +671,53 @@ export default function PortfolioPage() {
                         className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
                       />
                     </div>
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-sm text-gray-300">Charges / Fees</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={editBrokerageRate}
+                          onChange={(e) => setEditBrokerageRate(Number(e.target.value))}
+                          className="w-16 px-2 py-1 bg-dark-bg border border-dark-border rounded text-xs text-white text-right"
+                          title="Brokerage commission %"
+                        />
+                        <span className="text-xs text-gray-500">% broker</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const gross = Number(watchEdit('quantity') || 0) * Number(watchEdit('price_per_share') || 0);
+                            setEditValue('fees', computeNseCharges(gross, editBrokerageRate / 100));
+                          }}
+                          className="px-2 py-1 text-xs bg-dark-bg border border-dark-border text-primary-400 hover:text-primary-300 rounded"
+                        >
+                          Auto NSE
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="number"
+                      step="0.01"
+                      {...registerEdit('fees')}
+                      className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      placeholder="0.00"
+                    />
+                    {(() => {
+                      const gross = Number(watchEdit('quantity') || 0) * Number(watchEdit('price_per_share') || 0);
+                      const fees = Number(watchEdit('fees') || 0);
+                      const isBuy = watchEdit('transaction_type') === 'buy';
+                      const net = isBuy ? gross + fees : gross - fees;
+                      if (gross <= 0) return null;
+                      return (
+                        <div className="mt-2 text-xs text-gray-400 flex justify-between">
+                          <span>Gross: <span className="text-gray-200">{formatCurrency(gross)}</span></span>
+                          <span>Charges: <span className="text-gray-200">{formatCurrency(fees)}</span></span>
+                          <span>{isBuy ? 'Net payable' : 'Net received'}: <span className="text-white font-semibold">{formatCurrency(net)}</span></span>
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div>
                     <label className="block text-sm text-gray-300 mb-1">Notes (optional)</label>
