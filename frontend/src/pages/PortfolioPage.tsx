@@ -581,6 +581,13 @@ export default function PortfolioPage() {
                         >
                           Auto NSE
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => setValue('fees', 0)}
+                          className="px-2 py-1 text-xs bg-dark-bg border border-dark-border text-gray-400 hover:text-white rounded"
+                        >
+                          Clear
+                        </button>
                       </div>
                     </div>
                     <input
@@ -588,8 +595,9 @@ export default function PortfolioPage() {
                       step="0.01"
                       {...register('fees')}
                       className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-                      placeholder="0.00"
+                      placeholder="Type manually or click Auto NSE"
                     />
+                    <p className="mt-1 text-[11px] text-gray-500">Editable — paste the exact total from your broker contract note if needed.</p>
                     {(() => {
                       const gross = Number(watch('shares') || 0) * Number(watch('price_per_share') || 0);
                       const fees = Number(watch('fees') || 0);
@@ -700,6 +708,13 @@ export default function PortfolioPage() {
                         >
                           Auto NSE
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditValue('fees', 0)}
+                          className="px-2 py-1 text-xs bg-dark-bg border border-dark-border text-gray-400 hover:text-white rounded"
+                        >
+                          Clear
+                        </button>
                       </div>
                     </div>
                     <input
@@ -707,8 +722,9 @@ export default function PortfolioPage() {
                       step="0.01"
                       {...registerEdit('fees')}
                       className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-                      placeholder="0.00"
+                      placeholder="Type manually or click Auto NSE"
                     />
+                    <p className="mt-1 text-[11px] text-gray-500">Editable — paste the exact total from your broker contract note if needed.</p>
                     {(() => {
                       const gross = Number(watchEdit('quantity') || 0) * Number(watchEdit('price_per_share') || 0);
                       const fees = Number(watchEdit('fees') || 0);
