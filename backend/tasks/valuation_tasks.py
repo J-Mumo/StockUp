@@ -245,14 +245,26 @@ def parse_annual_reports(self):
 
     db = SessionLocal()
     try:
-        # Step 1: Parse reports for all active companies
-        summary = parse_all_companies(db, tickers=None, years=years, delay=5.0)
+        # Step 1: Parse reports for all active companies. Passing
+        # skip_if_exists=True prevents re-uploading PDFs to OpenAI for
+        # (ticker, year) combinations that already have substantially
+        # complete rows in financial_statements — the monthly job is
+        # meant to catch newly published reports, not re-parse settled
+        # data.
+        summary = parse_all_companies(
+            db,
+            tickers=None,
+            years=years,
+            delay=5.0,
+            skip_if_exists=True,
+        )
 
         parsed = summary.get("extracted", 0)
+        skipped = summary.get("skipped_existing", 0)
         failed = summary.get("failed", 0)
         logger.info(
             f"[valuation_tasks] Report parsing complete: "
-            f"parsed={parsed}, failed={failed}"
+            f"parsed={parsed}, skipped={skipped}, failed={failed}"
         )
 
         # Step 2: Recompute valuations if any data was extracted
@@ -281,6 +293,7 @@ def parse_annual_reports(self):
         return {
             "status": "success",
             "reports_parsed": parsed,
+            "reports_skipped_existing": skipped,
             "reports_failed": failed,
             "companies_revalued": valued,
             "years": list(years),

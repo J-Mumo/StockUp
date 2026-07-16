@@ -662,18 +662,20 @@ def parse_annual_report(
 
     Full pipeline: download -> extract -> validate -> upsert.
 
-    When ``skip_if_exists`` is True, an existing FinancialStatement row
-    with substantive data (any of revenue/net_income/total_assets/
-    total_equity already populated) short-circuits the pipeline before
-    the OpenAI call, saving an API request.
+    When ``skip_if_exists`` is True, a FinancialStatement row that is
+    substantially complete (at least 3 of revenue / net_income /
+    total_assets / total_equity populated) short-circuits the pipeline
+    before the OpenAI call, saving an API request. A row with fewer
+    fields populated is treated as a failed prior extraction and will
+    be retried.
 
     Returns summary dict with status and details.
     """
     ticker = company.ticker_symbol
     name = company.name
 
-    # Step 0 (optional): skip if we already have substantive data for
-    # this fiscal year. Saves an OpenAI extraction call.
+    # Step 0 (optional): skip if we already have substantially complete
+    # data for this fiscal year. Saves an OpenAI extraction call.
     if skip_if_exists:
         from app.models.financial_statement import FinancialStatement
 
@@ -686,15 +688,17 @@ def parse_annual_report(
             )
             .first()
         )
-        if existing and any(
-            getattr(existing, f, None) is not None
-            for f in ("revenue", "net_income", "total_assets", "total_equity")
-        ):
-            return {
-                "ticker": ticker,
-                "fiscal_year": fiscal_year,
-                "status": "skipped_existing",
-            }
+        if existing:
+            core_fields = ("revenue", "net_income", "total_assets", "total_equity")
+            populated = sum(
+                1 for f in core_fields if getattr(existing, f, None) is not None
+            )
+            if populated >= 3:
+                return {
+                    "ticker": ticker,
+                    "fiscal_year": fiscal_year,
+                    "status": "skipped_existing",
+                }
 
     # Step 1: Download PDF
     pdf_path = download_annual_report(
@@ -760,6 +764,7 @@ def parse_company_reports(
     *,
     delay: float = 5.0,
     force_redownload: bool = False,
+    skip_if_exists: bool = False,
 ) -> list[dict[str, Any]]:
     """Parse all available annual reports for a single company.
 
@@ -770,7 +775,11 @@ def parse_company_reports(
     results = []
     for i, year in enumerate(years):
         result = parse_annual_report(
-            db, company, year, force_redownload=force_redownload
+            db,
+            company,
+            year,
+            force_redownload=force_redownload,
+            skip_if_exists=skip_if_exists,
         )
         results.append(result)
 
@@ -787,7 +796,7 @@ def parse_company_reports(
             n_issues,
         )
 
-        # Rate limiting between API calls
+        # Only sleep between calls that actually hit the API.
         if i < len(list(years)) - 1 and status == "success":
             time.sleep(delay)
 
@@ -801,6 +810,7 @@ def parse_all_companies(
     *,
     delay: float = 5.0,
     force_redownload: bool = False,
+    skip_if_exists: bool = False,
 ) -> dict[str, Any]:
     """Parse annual reports for all (or specified) companies.
 
@@ -810,6 +820,9 @@ def parse_all_companies(
         years: Range of fiscal years to process.
         delay: Seconds between API calls (rate limiting).
         force_redownload: Redownload PDFs even if cached.
+        skip_if_exists: If True, skip (ticker, fiscal_year) combinations
+            that already have substantially complete data in the DB,
+            avoiding the OpenAI extraction call.
 
     Returns:
         Summary dict with statistics.
@@ -833,6 +846,7 @@ def parse_all_companies(
     total_extracted = 0
     total_failed = 0
     total_no_pdf = 0
+    total_skipped = 0
 
     for i, company in enumerate(companies, 1):
         print(
@@ -847,13 +861,17 @@ def parse_all_companies(
             years=years,
             delay=delay,
             force_redownload=force_redownload,
+            skip_if_exists=skip_if_exists,
         )
 
         for r in results:
             all_results.append(r)
-            if r["status"] == "success":
+            status = r["status"]
+            if status == "success":
                 total_extracted += 1
-            elif r["status"] == "no_pdf":
+            elif status == "skipped_existing":
+                total_skipped += 1
+            elif status == "no_pdf":
                 total_no_pdf += 1
             else:
                 total_failed += 1
@@ -871,6 +889,7 @@ def parse_all_companies(
         "companies_processed": len(companies),
         "total_years": len(list(years)) * len(companies),
         "extracted": total_extracted,
+        "skipped_existing": total_skipped,
         "no_pdf": total_no_pdf,
         "failed": total_failed,
         "results": all_results,
