@@ -330,6 +330,7 @@ export default function PortfolioPage() {
                         <th className="pb-3 font-medium text-right">Avg Cost</th>
                         <th className="pb-3 font-medium text-right">Current</th>
                         <th className="pb-3 font-medium text-right">Gain/Loss</th>
+                        <th className="pb-3 font-medium text-right">Margin of Safety</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -348,6 +349,13 @@ export default function PortfolioPage() {
                             {h.unrealized_pnl_pct !== null ? (
                               <span className={(h.unrealized_pnl_pct ?? 0) >= 0 ? 'text-gain' : 'text-loss'}>
                                 {(h.unrealized_pnl_pct ?? 0) >= 0 ? '+' : ''}{h.unrealized_pnl_pct?.toFixed(2)}%
+                              </span>
+                            ) : '—'}
+                          </td>
+                          <td className="py-3 text-right">
+                            {h.margin_of_safety_pct !== null && h.margin_of_safety_pct !== undefined ? (
+                              <span className={h.margin_of_safety_pct >= 0 ? 'text-gain' : 'text-loss'}>
+                                {h.margin_of_safety_pct >= 0 ? '+' : ''}{(h.margin_of_safety_pct * 100).toFixed(1)}%
                               </span>
                             ) : '—'}
                           </td>

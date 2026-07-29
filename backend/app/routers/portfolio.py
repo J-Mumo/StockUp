@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.company import Company
+from app.models.intrinsic_value import IntrinsicValue
 from app.models.portfolio import Portfolio, PortfolioTransaction
 from app.models.price_history import PriceHistory
 from app.models.user import User
@@ -312,6 +313,7 @@ def get_holdings(
 
     # Get latest prices for all companies in portfolio
     latest_prices = _get_latest_prices(db, company_ids)
+    latest_mos = _get_latest_margin_of_safety(db, company_ids)
 
     # Build response
     holdings: list[HoldingResponse] = []
@@ -355,6 +357,7 @@ def get_holdings(
             current_value=current_value,
             unrealized_pnl=unrealized_pnl,
             unrealized_pnl_pct=unrealized_pnl_pct,
+            margin_of_safety_pct=latest_mos.get(company_id),
         ))
 
     return HoldingsListResponse(
@@ -793,6 +796,26 @@ def _get_latest_prices(db: Session, company_ids: list[int]) -> dict[int, float]:
         if latest:
             prices[cid] = float(latest.close_price)
     return prices
+
+
+def _get_latest_margin_of_safety(
+    db: Session, company_ids: list[int]
+) -> dict[int, float]:
+    """Return {company_id: margin_of_safety_pct} from the newest valuation row."""
+    if not company_ids:
+        return {}
+
+    result: dict[int, float] = {}
+    for cid in company_ids:
+        latest = (
+            db.query(IntrinsicValue)
+            .filter(IntrinsicValue.company_id == cid)
+            .order_by(desc(IntrinsicValue.valuation_date), desc(IntrinsicValue.id))
+            .first()
+        )
+        if latest and latest.margin_of_safety_pct is not None:
+            result[cid] = float(latest.margin_of_safety_pct)
+    return result
 
 
 def _portfolio_to_response(portfolio: Portfolio) -> PortfolioResponse:

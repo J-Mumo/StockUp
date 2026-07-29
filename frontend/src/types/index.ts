@@ -153,6 +153,7 @@ export interface Holding {
   current_value: number | null;
   unrealized_pnl: number | null;
   unrealized_pnl_pct: number | null;
+  margin_of_safety_pct: number | null;
 }
 
 export interface HoldingsListResponse {

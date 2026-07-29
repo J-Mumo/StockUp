@@ -107,6 +107,7 @@ class HoldingResponse(BaseModel):
     current_value: float | None = None
     unrealized_pnl: float | None = None
     unrealized_pnl_pct: float | None = None
+    margin_of_safety_pct: float | None = None
 
 
 class HoldingsListResponse(BaseModel):
