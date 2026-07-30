@@ -98,3 +98,49 @@ def health_check():
         "database": db_status,
         "redis": redis_status,
     }
+
+
+@app.get("/health/data", tags=["health"])
+def data_freshness_check(max_business_days_stale: int = 3):
+    """Fails (HTTP 503) when the latest price_history row is older than
+    max_business_days_stale business days. Point an uptime monitor at this
+    to catch silent scraper regressions (like the kwayisi outage that went
+    unnoticed for 3 weeks)."""
+    from datetime import date, timedelta
+    from fastapi.responses import JSONResponse
+    from sqlalchemy import text
+    from app.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        latest = db.execute(text("SELECT MAX(price_date) FROM price_history")).scalar()
+    finally:
+        db.close()
+
+    today = date.today()
+    if latest is None:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "stale",
+                "latest_price_date": None,
+                "reason": "price_history table is empty",
+            },
+        )
+
+    # Count business days (Mon-Fri) between latest and today, exclusive of latest.
+    business_days = 0
+    cursor = latest + timedelta(days=1)
+    while cursor <= today:
+        if cursor.weekday() < 5:
+            business_days += 1
+        cursor += timedelta(days=1)
+
+    fresh = business_days <= max_business_days_stale
+    payload = {
+        "status": "fresh" if fresh else "stale",
+        "latest_price_date": latest.isoformat(),
+        "business_days_stale": business_days,
+        "threshold_business_days": max_business_days_stale,
+    }
+    return payload if fresh else JSONResponse(status_code=503, content=payload)
