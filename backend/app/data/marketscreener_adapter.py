@@ -41,8 +41,12 @@ def _build_history_url(settings: dict, instrument_id: int) -> str:
 
 
 def _extract_iframe_url(html_content: str) -> str | None:
+    # Marketscreener has shipped at least two iframe URL shapes:
+    #   https://light.it-finance.com/ZoneBoursePublic/itcharts.phtml?...
+    #   https://zonebourse.it-finance.com/ProRealTime_ZoneBourse_Public/itcharts.phtml?...
+    # Match any *.it-finance.com host and any path segment that hosts itcharts.phtml.
     matches = re.findall(
-        r"https://light\.it-finance\.com/ZoneBoursePublic/itcharts\.phtml[^\"']+",
+        r"https://[a-z0-9.-]+\.it-finance\.com/[A-Za-z0-9_/-]+/itcharts\.phtml[^\"']+",
         html_content,
     )
     if not matches:
@@ -154,7 +158,7 @@ async def fetch_history(graphics_url: str, headless: bool = True) -> list[dict]:
             await asyncio.sleep(8)
 
             iframe_urls = await page.locator("iframe").evaluate_all(
-                "nodes => nodes.map(node => node.src).filter(src => src && src.includes('light.it-finance.com/ZoneBoursePublic/itcharts.phtml'))"
+                "nodes => nodes.map(node => node.src).filter(src => src && /\\.it-finance\\.com\\/.+\\/itcharts\\.phtml/.test(src))"
             )
             if not iframe_urls:
                 fallback_iframe = _extract_iframe_url(await page.content())
