@@ -28,7 +28,8 @@ stockup.jmumo.com {
     }
 
     # Swagger UI + OpenAPI schema live at the FastAPI root (no /api prefix).
-    handle /docs* /openapi.json /redoc* {
+    @fastapi_docs path /docs /docs/* /openapi.json /redoc /redoc/*
+    handle @fastapi_docs {
         reverse_proxy stockup-api-1:8000
     }
 
