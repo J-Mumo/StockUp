@@ -1,0 +1,8 @@
+# SPA server — inside the Docker network only. The public TLS Caddy proxies
+# stockup.jmumo.com here and strips /api/* before it reaches this container.
+:80 {
+    root * /usr/share/caddy
+    encode zstd gzip
+    try_files {path} /index.html
+    file_server
+}

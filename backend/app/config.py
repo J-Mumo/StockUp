@@ -13,6 +13,16 @@ class Settings(BaseSettings):
     app_debug: bool = True
     app_port: int = 8000
 
+    # CORS — comma-separated list of allowed origins. In production this should
+    # be set to the public origin(s) that host the SPA, e.g.
+    #   CORS_ORIGINS=https://stockup.jmumo.com
+    # Localhost defaults keep the Vite dev server working out of the box.
+    cors_origins: str = "http://localhost:5173,http://localhost:3000"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
     # Database
     database_url: str = "postgresql://stockup:stockup123@localhost:5432/stockup"
 

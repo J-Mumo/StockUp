@@ -1,9 +1,14 @@
-# StockUp production stack (Azure VM).
+# StockUp production stack.
 #
 # Bring up:   docker compose up -d --build      # compose auto-loads .env
 # Tail logs:  docker compose logs -f api worker beat
 # Migrate:    handled automatically on api startup
 # Backfill:   docker compose exec api python -m cli.commands backfill-prices
+#
+# Public ingress: TLS terminates in the shared Caddy proxy stack (~/proxy on the
+# host). Caddy reaches this stack through the external `web` Docker network by
+# resolving the container names `stockup-api-1` and `stockup-frontend-1`.
+# Nothing here binds to a host port.
 
 name: stockup
 
@@ -50,12 +55,25 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    # Bind to loopback only — access from your laptop via SSH tunnel:
-    #   ssh -i StockUpVM_key.pem -L 8000:localhost:8000 stockup@<vm-ip>
-    ports:
-      - "127.0.0.1:8000:8000"
+    # No host ports: the shared Caddy proxy reaches us on the `web` network.
+    # For local dev / one-off debugging, uncomment:
+    # ports: ["127.0.0.1:8000:8000"]
+    networks:
+      - default
+      - web
     volumes:
       - app_data:/app/data
+
+  frontend:
+    build:
+      context: ./frontend
+    image: stockup-frontend:latest
+    restart: unless-stopped
+    depends_on:
+      - api
+    networks:
+      - default
+      - web
 
   worker:
     image: stockup-backend:latest
@@ -99,3 +117,8 @@ volumes:
   postgres_data:
   redis_data:
   app_data:
+
+networks:
+  default:
+  web:
+    external: true

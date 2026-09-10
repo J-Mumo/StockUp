@@ -1,0 +1,38 @@
+# Shared reverse-proxy stack.
+#
+# One Caddy instance terminates TLS for every app on this host and routes by
+# Host header to per-app containers over the external `web` Docker network.
+#
+# Deployed on the host at ~/proxy/ (copied from this folder, not managed by the
+# StockUp compose project). Bring up ONCE per host:
+#
+#   docker network create web         # once, before first `up`
+#   cd ~/proxy && docker compose up -d
+#
+# Reload without downtime after editing Caddyfile:
+#   docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+
+name: proxy
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"     # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - web
+
+networks:
+  web:
+    external: true
+
+volumes:
+  caddy_data:
+  caddy_config:

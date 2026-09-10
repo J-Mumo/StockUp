@@ -1,0 +1,49 @@
+# Shared Caddy reverse-proxy config for all apps on this Hetzner host.
+#
+# Rules:
+#   - Each app is a top-level site block, keyed by its public hostname.
+#   - The upstream container name follows Docker Compose naming:
+#         <project-name>-<service>-<index>
+#     e.g. `stockup-api-1`, `stockup-frontend-1`.
+#   - Caddy auto-provisions Let's Encrypt certs on first request. No manual
+#     certbot, no renewal cron. Certs persist in the `caddy_data` volume.
+#
+# After edits: `docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile`
+
+{
+    # Global options
+    email admin@jmumo.com
+}
+
+# ---------------------------------------------------------------------------
+# StockUp — FastAPI + React (Vite)
+# ---------------------------------------------------------------------------
+stockup.jmumo.com {
+    encode zstd gzip
+
+    # API routes: strip the /api prefix so FastAPI sees /companies, /auth, ...
+    handle_path /api/* {
+        reverse_proxy stockup-api-1:8000
+    }
+
+    # SPA everything else
+    handle {
+        reverse_proxy stockup-frontend-1:80
+    }
+}
+
+# ---------------------------------------------------------------------------
+# MaliScope — Next.js (SSR, standalone)
+# ---------------------------------------------------------------------------
+maliscope.jmumo.com {
+    encode zstd gzip
+    reverse_proxy maliscope-web-1:3000
+}
+
+# ---------------------------------------------------------------------------
+# PesaTrack — Astro static marketing site
+# ---------------------------------------------------------------------------
+pesatrack.jmumo.com {
+    encode zstd gzip
+    reverse_proxy pesatrack-web-1:80
+}

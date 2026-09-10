@@ -64,3 +64,9 @@ backend/inspect_html.py
 backend/tmp_*.py
 backend/_bat2014_raw.txt
 
+
+# Celery beat runtime schedule (regenerated on each beat start)
+backend/celerybeat-schedule*
+
+# Ad-hoc local Postgres dumps
+*.dump
