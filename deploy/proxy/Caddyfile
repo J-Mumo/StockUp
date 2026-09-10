@@ -21,8 +21,14 @@
 stockup.jmumo.com {
     encode zstd gzip
 
-    # API routes: strip the /api prefix so FastAPI sees /companies, /auth, ...
-    handle_path /api/* {
+    # API routes: forward /api/* untouched — FastAPI routers already include
+    # the /api/ prefix (see backend/app/routers/*.py).
+    handle /api/* {
+        reverse_proxy stockup-api-1:8000
+    }
+
+    # Swagger UI + OpenAPI schema live at the FastAPI root (no /api prefix).
+    handle /docs* /openapi.json /redoc* {
         reverse_proxy stockup-api-1:8000
     }
 
