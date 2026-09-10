@@ -322,7 +322,7 @@ class TestValuationsEndpoints:
         data = response.json()
         assert len(data) == 1
         assert data[0]["dcf_value"] == 55.0
-        assert data[0]["margin_of_safety_pct"] == 12.6
+        assert data[0]["margin_of_safety_pct"] == 0.126
 
     def test_get_latest_valuation(
         self, client: TestClient, company: Company, valuation: IntrinsicValue

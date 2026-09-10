@@ -235,7 +235,7 @@ def valuation(db: Session, company: Company) -> IntrinsicValue:
         book_value_estimate=35.0,
         weighted_intrinsic_value=49.5,
         current_market_price=43.25,
-        margin_of_safety_pct=12.6,
+        margin_of_safety_pct=0.126,
         recommendation="Accumulate",
         recommendation_reason="Fairly valued with high ROE",
         assumptions={"discount_rate": 0.12, "growth_rate": 0.03},

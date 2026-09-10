@@ -146,7 +146,7 @@ export default function DashboardPage() {
                     </td>
                     <td className="py-3 text-right">
                       <span className="text-gain font-medium">
-                        {stock.margin_of_safety_pct.toFixed(1)}%
+                        {(stock.margin_of_safety_pct * 100).toFixed(1)}%
                       </span>
                     </td>
                     <td className="py-3 text-right">
