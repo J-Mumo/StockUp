@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     scraper_base_url: str = "https://afx.kwayisi.org/ngse/"
     marketscreener_enabled: bool = True
 
+    # Internal machine-to-machine API (used by the local price fetcher, which
+    # runs on the operator's machine because MarketScreener blocks the VM IP).
+    # Leave blank to disable the /api/internal/* endpoints entirely.
+    internal_api_token: str = ""
+
     # AI Financial Enrichment
     ai_provider: str = "openai"  # "openai" or "anthropic"
     openai_api_key: str = ""

@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import auth, stocks, alerts, analysis, portfolio, watchlists, dashboard, notes, company_chat, goals
+from app.routers import auth, stocks, alerts, analysis, portfolio, watchlists, dashboard, notes, company_chat, goals, internal
 
 settings = get_settings()
 
@@ -56,6 +56,7 @@ app.include_router(dashboard.router)
 app.include_router(notes.router)
 app.include_router(company_chat.router)
 app.include_router(goals.router)
+app.include_router(internal.router)
 
 
 @app.get("/", tags=["health"])

@@ -74,10 +74,16 @@ celery_app.conf.update(
 # ---------------------------------------------------------------------------
 
 celery_app.conf.beat_schedule = {
-    "daily-price-fetch": {
-        "task": "tasks.price_tasks.fetch_all_prices",
-        "schedule": crontab(hour=15, minute=0),  # 6PM EAT
-    },
+    # NOTE: daily-price-fetch is intentionally disabled in production.
+    # Marketscreener (and the other public NSE sources we've tried) blocks the
+    # Hetzner VM's IP range with HTTP 403 from Akamai. Prices are ingested via
+    # a local Windows scheduled task that runs `backend/scripts/local_price_updater.py`
+    # from the operator's home IP and POSTs to `/api/internal/prices/upsert`.
+    # Re-enable this block if/when a working server-side source is added.
+    # "daily-price-fetch": {
+    #     "task": "tasks.price_tasks.fetch_all_prices",
+    #     "schedule": crontab(hour=15, minute=0),  # 6PM EAT
+    # },
     "daily-valuation-recalc": {
         "task": "tasks.valuation_tasks.recalculate_all_valuations",
         "schedule": crontab(hour=16, minute=0),  # 7PM EAT
