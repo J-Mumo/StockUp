@@ -7,7 +7,7 @@ Implements idempotent upsert to prevent duplicate price records.
 
 import logging
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -61,22 +61,61 @@ def upsert_price(db: Session, company_id: int, price_data: dict) -> bool:
 
 
 def fetch_daily_prices(db: Session) -> dict:
-    """Fetch today's prices for all active companies.
-    
-    Strategy:
-    1. Try scraper for bulk current prices (single HTTP request)
-    2. For any companies not covered, try yfinance individually
-    
-    Returns dict with stats.
+    """Fetch recent prices for all active companies.
+
+    Strategy (in order):
+    1. Marketscreener: for each company with a stored graphics URL, fetch the
+       full daily history and upsert any candles from the last ~14 days.
+       Upserts are idempotent, so re-running is safe and naturally backfills
+       any gaps from previous missed runs. This is the primary source in
+       production (afx and yfinance are unreliable / geo-blocked from the VM).
+    2. NSE scraper (afx.kwayisi.org) — bulk single-request fallback, used for
+       any companies not covered by Marketscreener. Only works from unblocked
+       networks (typically local dev).
+    3. yfinance — last-ditch per-company fetch for anything still missing that
+       has a yfinance_ticker set.
+
+    Returns dict with per-source counts.
     """
-    stats = {"scraped": 0, "yfinance": 0, "failed": 0, "upserted": 0}
+    stats = {
+        "marketscreener": 0,
+        "scraped": 0,
+        "yfinance": 0,
+        "failed": 0,
+        "upserted": 0,
+    }
 
     # Get all active companies
     companies = db.query(Company).filter(Company.is_active == True).all()
     ticker_to_company = {c.ticker_symbol: c for c in companies}
 
-    # Step 1: Try scraper for bulk prices
-    if settings.scraper_enabled:
+    # Step 1: Marketscreener (primary in production)
+    if settings.marketscreener_enabled:
+        cutoff = date.today() - timedelta(days=14)
+        # Iterate over a snapshot; we mutate ticker_to_company as we succeed.
+        for ticker, company in list(ticker_to_company.items()):
+            if not company.marketscreener_graphics_url:
+                continue
+            try:
+                candles = marketscreener_adapter.fetch_history_sync(
+                    company.marketscreener_graphics_url
+                )
+                rows = marketscreener_adapter.candles_to_price_rows(candles)
+                fresh = [r for r in rows if r["price_date"] >= cutoff]
+                for row in fresh:
+                    if upsert_price(db, company.id, row):
+                        stats["upserted"] += 1
+                if fresh:
+                    stats["marketscreener"] += 1
+                    ticker_to_company.pop(ticker, None)
+                    # Commit per company so a later failure doesn't lose progress.
+                    db.commit()
+            except Exception as e:
+                logger.warning(f"Marketscreener failed for {ticker}: {e}")
+                db.rollback()
+
+    # Step 2: Try scraper for bulk prices (any remaining companies)
+    if settings.scraper_enabled and ticker_to_company:
         try:
             scraped_prices = nse_scraper.scrape_current_prices()
             for price_data in scraped_prices:
@@ -90,7 +129,7 @@ def fetch_daily_prices(db: Session) -> dict:
         except Exception as e:
             logger.error(f"Scraper failed: {e}")
 
-    # Step 2: Try yfinance for remaining companies
+    # Step 3: Try yfinance for remaining companies
     if settings.yfinance_enabled:
         remaining = {t: c for t, c in ticker_to_company.items() if c.yfinance_ticker}
         for ticker, company in remaining.items():
@@ -100,6 +139,7 @@ def fetch_daily_prices(db: Session) -> dict:
                     if upsert_price(db, company.id, price_data):
                         stats["upserted"] += 1
                     stats["yfinance"] += 1
+                    ticker_to_company.pop(ticker, None)
                 else:
                     stats["failed"] += 1
                 time.sleep(0.5)  # Rate limiting for yfinance
@@ -109,9 +149,9 @@ def fetch_daily_prices(db: Session) -> dict:
 
     db.commit()
     logger.info(
-        f"Daily fetch complete: scraped={stats['scraped']}, "
-        f"yfinance={stats['yfinance']}, failed={stats['failed']}, "
-        f"upserted={stats['upserted']}"
+        f"Daily fetch complete: marketscreener={stats['marketscreener']}, "
+        f"scraped={stats['scraped']}, yfinance={stats['yfinance']}, "
+        f"failed={stats['failed']}, upserted={stats['upserted']}"
     )
     return stats
 
