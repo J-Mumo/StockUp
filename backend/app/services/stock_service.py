@@ -346,6 +346,7 @@ def _financial_to_schema(fs: FinancialStatement) -> FinancialStatementResponse:
         return_on_equity=float(fs.return_on_equity) if fs.return_on_equity is not None else None,
         debt_to_equity=float(fs.debt_to_equity) if fs.debt_to_equity is not None else None,
         current_ratio=float(fs.current_ratio) if fs.current_ratio is not None else None,
+        sector_metrics=fs.sector_metrics,
         notes=fs.notes,
         report_date=fs.report_date,
         entered_by_user_id=fs.entered_by_user_id,
