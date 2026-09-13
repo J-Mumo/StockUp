@@ -21,6 +21,7 @@ interface Props {
   as?: 'span' | 'p' | 'div';
   showIconAlways?: boolean;  // force icon visible even when Learn Mode is off
   hideOneLiner?: boolean;    // suppress inline one-liner (dense contexts like table headers)
+  alwaysShowOneLiner?: boolean; // force inline one-liner regardless of Learn Mode
   labelOverride?: string;    // display a different label than the metric's default
 }
 
@@ -51,6 +52,7 @@ export default function MetricLabel({
   as: Tag = 'p',
   showIconAlways = false,
   hideOneLiner = false,
+  alwaysShowOneLiner = false,
   labelOverride,
 }: Props) {
   const metric = getMetric(metricKey);
@@ -76,9 +78,8 @@ export default function MetricLabel({
       <button
         type="button"
         onClick={handleClick}
-        title={metric.one_liner}
         aria-label={`Learn about ${metric.label}`}
-        className="group inline-flex items-center gap-1 hover:text-gray-200 transition-colors cursor-help"
+        className="group inline-flex items-center gap-1 hover:text-gray-200 transition-colors cursor-pointer"
       >
         <span>{labelOverride ?? metric.label}</span>
         <Info
@@ -86,7 +87,7 @@ export default function MetricLabel({
           className={`${showIcon ? 'opacity-70' : 'opacity-0 group-hover:opacity-70'} transition-opacity`}
         />
       </button>
-      {enabled && !hideOneLiner && (
+      {(alwaysShowOneLiner || enabled) && !hideOneLiner && (
         <span className="block mt-0.5 text-[11px] text-gray-500 leading-snug">
           {metric.one_liner}
         </span>

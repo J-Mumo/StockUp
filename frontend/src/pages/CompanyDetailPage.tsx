@@ -1092,26 +1092,50 @@ export default function CompanyDetailPage() {
       {latestFinancial && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
           <div className="bg-dark-surface border border-dark-border rounded-xl p-4">
-            <p className="text-xs text-gray-400 mb-1">P/E Ratio</p>
-            <p className="text-xl font-bold text-white">{pe != null ? pe.toFixed(1) : '—'}</p>
-            <p className="text-xs text-gray-500">Price / EPS</p>
+            <MetricLabel
+              metricKey="pe_ratio"
+              value={pe}
+              contextLabel={company?.name}
+              sector={company?.sector}
+              className="mb-1"
+              alwaysShowOneLiner
+            />
+            <p className="text-xl font-bold text-white mt-1">{pe != null ? pe.toFixed(1) : '—'}</p>
           </div>
           <div className="bg-dark-surface border border-dark-border rounded-xl p-4">
-            <p className="text-xs text-gray-400 mb-1">P/B Ratio</p>
-            <p className="text-xl font-bold text-white">{pb != null ? pb.toFixed(2) : '—'}</p>
-            <p className="text-xs text-gray-500">Price / Book Value</p>
+            <MetricLabel
+              metricKey="pb_ratio"
+              value={pb}
+              contextLabel={company?.name}
+              sector={company?.sector}
+              className="mb-1"
+              alwaysShowOneLiner
+            />
+            <p className="text-xl font-bold text-white mt-1">{pb != null ? pb.toFixed(2) : '—'}</p>
           </div>
           <div className="bg-dark-surface border border-dark-border rounded-xl p-4">
-            <p className="text-xs text-gray-400 mb-1">Debt / Equity</p>
-            <p className={`text-xl font-bold ${latestFinancial.debt_to_equity && latestFinancial.debt_to_equity > 2 ? 'text-loss' : 'text-white'}`}>
+            <MetricLabel
+              metricKey="debt_to_equity"
+              value={latestFinancial.debt_to_equity}
+              contextLabel={company?.name}
+              sector={company?.sector}
+              className="mb-1"
+              alwaysShowOneLiner
+            />
+            <p className={`text-xl font-bold mt-1 ${latestFinancial.debt_to_equity && latestFinancial.debt_to_equity > 2 ? 'text-loss' : 'text-white'}`}>
               {latestFinancial.debt_to_equity != null ? latestFinancial.debt_to_equity.toFixed(2) : '—'}
             </p>
-            <p className="text-xs text-gray-500">Total Debt / Equity</p>
           </div>
           <div className="bg-dark-surface border border-dark-border rounded-xl p-4">
-            <p className="text-xs text-gray-400 mb-1">Dividend Yield</p>
-            <p className="text-xl font-bold text-white">{divYield != null ? (divYield * 100).toFixed(1) + '%' : '—'}</p>
-            <p className="text-xs text-gray-500">DPS / Price</p>
+            <MetricLabel
+              metricKey="dividend_yield"
+              value={divYield}
+              contextLabel={company?.name}
+              sector={company?.sector}
+              className="mb-1"
+              alwaysShowOneLiner
+            />
+            <p className="text-xl font-bold text-white mt-1">{divYield != null ? (divYield * 100).toFixed(1) + '%' : '—'}</p>
           </div>
         </div>
       )}
