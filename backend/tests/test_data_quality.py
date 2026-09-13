@@ -158,6 +158,59 @@ class TestValidateROE:
         warns = [i for i in report.issues if i.field_name == "return_on_equity"]
         assert len(warns) == 1
         assert warns[0].severity == "warn"
+        assert "methodology variance" in warns[0].message
+
+
+# --- validate_row: balance-sheet reconciliation ---------------------------
+
+class TestValidateBalanceSheetReconciliation:
+    def test_reconciled_balance_sheet_passes(self):
+        company = _make_company()
+        fs = _make_fs(
+            total_assets=1_962_320_000_000,
+            total_liabilities=1_679_341_000_000,
+            shareholders_equity=282_979_000_000,  # 1679.341 + 282.979 = 1962.320
+        )
+
+        report = validate_row(fs, company)
+
+        assert all(i.field_name != "total_assets" for i in report.issues)
+
+    def test_unreconciled_balance_sheet_is_error(self):
+        company = _make_company()
+        # Assets duplicated from prior year (2170.874) but real liab+equity
+        # only sum to 1,962.320B -- classic ingest bug.
+        fs = _make_fs(
+            total_assets=2_170_874_000_000,
+            total_liabilities=1_679_341_000_000,
+            shareholders_equity=282_979_000_000,
+        )
+
+        report = validate_row(fs, company)
+
+        errors = [
+            i for i in report.issues
+            if i.field_name == "total_assets" and i.severity == "error"
+        ]
+        assert len(errors) == 1
+        assert "reconcile" in errors[0].message
+        assert not report.ok
+
+    def test_missing_totals_skips_reconciliation(self):
+        company = _make_company()
+        fs = _make_fs(
+            total_assets=1_962_320_000_000,
+            total_liabilities=None,
+            shareholders_equity=282_979_000_000,
+        )
+
+        report = validate_row(fs, company)
+
+        # Missing pieces -> no reconciliation check, no error emitted.
+        assert not any(
+            i.field_name == "total_assets" and "reconcile" in i.message
+            for i in report.issues
+        )
 
 
 # --- validate_row: period type + sector_metrics ---------------------------

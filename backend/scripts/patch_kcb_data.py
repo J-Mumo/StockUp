@@ -1,16 +1,30 @@
-"""Idempotent KCB data patch — fixes two known ingest bugs.
+"""Idempotent KCB data patches — corrects known ingest bugs against
+authoritative KCB Group 2024 audited financial statements.
 
-1. FY2020 revenue & net_income were ingested as raw KES instead of
-   thousands (off by 3 orders of magnitude). Fix: multiply by 1000.
-     - revenue     88,745,452     -> 88,745,452,000       (88.7B, matches KCB Group FY2020 operating income)
-     - net_income  19,603,642     -> 19,603,642,000       (19.6B, matches KCB Group FY2020 PAT and reconciles with EPS 6.10 / shares 3.213B)
+Source: KCB Group PLC 2024 Integrated Report & audited consolidated
+statement of financial position; CMA abridged FY2024 filings.
 
-2. FY2024 net_income was ingested as 52.2B but KCB Group Q4 2024
-   announcement reports 61.8B (also reconciles with EPS 18.70 on
-   weighted-avg shares 3.305B). Fix: overwrite with 61.8B.
+FY2020 (unit-error fix):
+  revenue     88,745,452       -> 88,745,452,000       (x1000; raw KES vs thousands)
+  net_income  19,603,642       -> 19,603,642,000       (x1000; reconciles with EPS 6.10)
 
-Idempotent: checks the current value against the "before" fingerprint and
-only writes if it matches; skips otherwise. Safe to re-run.
+FY2024 (authoritative-restate):
+  net_income        52,238,219,000    -> 61,775,000,000
+      (52.239B was ingested from Total Comprehensive Income line by
+       mistake; the audited Profit for the Year is 61.775B. EPS 18.70 x
+       weighted-avg shares 3.305B ~= 61.8B.)
+  total_assets      2,170,873,992,000 -> 1,962,320,000,000
+      (assets actually declined 9.6% YoY. Original value was a duplicate
+       of FY2023 -- confirmed by KCB audited BS and Cytonn.)
+  total_liabilities 1,959,903,519,000 -> 1,679,341,000,000
+      (from audited BS; reconciles as 1,679.341 + 282.979 = 1,962.320.)
+  total_equity      211,970,473,000   -> 282,979,000,000
+      (total equity including minority interest; matches the already-
+       correct shareholders_equity value and reconciles Assets = L + E.)
+
+Idempotent: each field-level fix is guarded by a before-state check. It
+accepts either the original ingested value OR any previously-committed
+patched value that is still known-wrong, so re-running is safe.
 
     docker exec stockup-api-1 python -m scripts.patch_kcb_data --commit
 """
@@ -18,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 from decimal import Decimal
+from typing import Iterable
 
 from app.database import SessionLocal
 from app.models.company import Company
@@ -38,39 +53,96 @@ def _get_row(db, ticker: str, fiscal_year: int) -> FinancialStatement | None:
     )
 
 
-def _fix_fy2020(db) -> str:
+def _fix_field(
+    row: FinancialStatement,
+    field: str,
+    accepted_before: Iterable[Decimal],
+    target: Decimal,
+) -> str:
+    current = getattr(row, field)
+    if current == target:
+        return f"    {field}: already at target {target}"
+    if not any(current == b for b in accepted_before):
+        return (
+            f"    {field}: skip — current {current} not in accepted "
+            f"before-states {list(accepted_before)}"
+        )
+    setattr(row, field, target)
+    return f"    {field}: {current} -> {target}"
+
+
+def _fix_fy2020(db) -> list[str]:
     row = _get_row(db, "KCB", 2020)
     if row is None:
-        return "FY2020: not found"
+        return ["FY2020: not found"]
 
-    expected_revenue = Decimal("88745452.00")
-    expected_ni = Decimal("19603642.00")
-    if row.revenue != expected_revenue or row.net_income != expected_ni:
-        return (
-            f"FY2020: skip — current revenue={row.revenue}, ni={row.net_income} "
-            f"don't match expected before-state; already patched or drift"
+    lines = ["FY2020 (unit-error x1000):"]
+    lines.append(
+        _fix_field(
+            row,
+            "revenue",
+            accepted_before=[Decimal("88745452.00")],
+            target=Decimal("88745452000.00"),
         )
+    )
+    lines.append(
+        _fix_field(
+            row,
+            "net_income",
+            accepted_before=[Decimal("19603642.00")],
+            target=Decimal("19603642000.00"),
+        )
+    )
+    return lines
 
-    row.revenue = expected_revenue * 1000
-    row.net_income = expected_ni * 1000
-    return f"FY2020: revenue {expected_revenue} -> {row.revenue}, ni {expected_ni} -> {row.net_income}"
 
-
-def _fix_fy2024(db) -> str:
+def _fix_fy2024(db) -> list[str]:
     row = _get_row(db, "KCB", 2024)
     if row is None:
-        return "FY2024: not found"
+        return ["FY2024: not found"]
 
-    expected_ni = Decimal("52238219000.00")
-    new_ni = Decimal("61800000000.00")
-    if row.net_income != expected_ni:
-        return (
-            f"FY2024: skip — current ni={row.net_income} "
-            f"doesn't match expected before-state; already patched or drift"
+    lines = ["FY2024 (authoritative restate from KCB FY2024 audited FS):"]
+    # Net income: original 52.238B (misread as TCI) or prior-patched 61.8B.
+    lines.append(
+        _fix_field(
+            row,
+            "net_income",
+            accepted_before=[
+                Decimal("52238219000.00"),
+                Decimal("61800000000.00"),
+            ],
+            target=Decimal("61775000000.00"),
         )
-
-    row.net_income = new_ni
-    return f"FY2024: net_income {expected_ni} -> {new_ni}"
+    )
+    # Total assets: was duplicated from FY2023 value.
+    lines.append(
+        _fix_field(
+            row,
+            "total_assets",
+            accepted_before=[Decimal("2170873992000.00")],
+            target=Decimal("1962320000000.00"),
+        )
+    )
+    # Total liabilities: reconciles Assets = Liab + Equity.
+    lines.append(
+        _fix_field(
+            row,
+            "total_liabilities",
+            accepted_before=[Decimal("1959903519000.00")],
+            target=Decimal("1679341000000.00"),
+        )
+    )
+    # Total equity: wrong 212B replaced with authoritative 283B (matches
+    # shareholders_equity, reconciles the balance sheet).
+    lines.append(
+        _fix_field(
+            row,
+            "total_equity",
+            accepted_before=[Decimal("211970473000.00")],
+            target=Decimal("282979000000.00"),
+        )
+    )
+    return lines
 
 
 def main() -> None:
@@ -84,8 +156,10 @@ def main() -> None:
 
     db = SessionLocal()
     try:
-        print(_fix_fy2020(db))
-        print(_fix_fy2024(db))
+        for line in _fix_fy2020(db):
+            print(line)
+        for line in _fix_fy2024(db):
+            print(line)
         if args.commit:
             db.commit()
             print("Committed.")

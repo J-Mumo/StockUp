@@ -32,6 +32,7 @@ EQUITY_YOY_MIN = -0.40             # equity shouldn't drop >40% YoY
 EQUITY_YOY_MAX = 0.60              # or grow >60% YoY (excl. rights issues)
 BS_YOY_FLAT_EPS = 0.001            # < 0.1% YoY change on a balance-sheet total = duplicate ingest
 PL_SCALE_JUMP_RATIO = 50.0         # >50x YoY on revenue/NI = base-year data error
+BS_RECONCILE_TOLERANCE = 0.01      # |A - (L + E)| / A > 1% = failed reconciliation
 
 
 # Result types ---------------------------------------------------------------
@@ -141,7 +142,12 @@ def validate_row(
                 )
             )
 
-    # 3. ROE vs NI/equity
+    # 3. ROE vs NI/equity — methodology variance, not an error.
+    # Reported ROE is typically computed on *average* equity and may use
+    # attributable-to-owners equity, while NI/(closing equity) uses
+    # point-in-time total equity. A 200 bps gap almost always reflects
+    # this definition difference. We preserve the reported value and
+    # surface both figures for transparency.
     if ni and equity and roe is not None:
         implied = ni / equity
         if abs(implied - roe) > ROE_TOLERANCE_ABS:
@@ -149,8 +155,10 @@ def validate_row(
                 QualityIssue(
                     "return_on_equity",
                     "warn",
-                    f"ROE={roe:.3f} disagrees with NI/equity={implied:.3f} "
-                    f"(>{ROE_TOLERANCE_ABS:.2f} abs)",
+                    f"ROE methodology variance: reported={roe:.3f} vs "
+                    f"NI/closing-equity={implied:.3f} (diff={implied - roe:+.3f}). "
+                    f"Likely average-vs-point-in-time equity or "
+                    f"attributable-vs-total equity; reported ROE preserved.",
                 )
             )
 
@@ -208,6 +216,30 @@ def validate_row(
                             f"probable base-year data error",
                         )
                     )
+
+    # 4d. Balance-sheet reconciliation: Assets = Liabilities + Equity
+    # (within tolerance). This catches the most common ingest bug --
+    # one of the three totals being carried over from the wrong row,
+    # unit-mismatched, or missing entirely -- long before it corrupts
+    # the valuation model.
+    total_assets = _f(fs.total_assets)
+    total_liab = _f(fs.total_liabilities)
+    if total_assets and total_liab and equity and total_assets > 0:
+        implied_a = total_liab + equity
+        diff = total_assets - implied_a
+        rel = abs(diff) / total_assets
+        if rel > BS_RECONCILE_TOLERANCE:
+            report.issues.append(
+                QualityIssue(
+                    "total_assets",
+                    "error",
+                    f"Balance sheet does not reconcile: "
+                    f"assets={total_assets:.0f} vs "
+                    f"liabilities+equity={implied_a:.0f} "
+                    f"(diff={diff:+.0f}, {rel:.2%} of assets); "
+                    f"one of the three totals is mis-ingested",
+                )
+            )
 
     # 5. Period type must be annual for the valuation engine
     period_type = (fs.period_type or "annual").lower()
