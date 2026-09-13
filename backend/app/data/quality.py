@@ -26,13 +26,15 @@ from app.models.financial_statement import FinancialStatement
 # Tolerances -----------------------------------------------------------------
 
 EPS_TOLERANCE = 0.10               # EPS vs NI/shares (banks routinely diluted)
+EPS_SHARE_HISTORY_RATIO = 2.0      # >2x mismatch between implied and stored shares -> share-split artifact, not a period mismatch
 BVPS_TOLERANCE = 0.05
 ROE_TOLERANCE_ABS = 0.02           # 200 bps
 EQUITY_YOY_MIN = -0.40             # equity shouldn't drop >40% YoY
 EQUITY_YOY_MAX = 0.60              # or grow >60% YoY (excl. rights issues)
 BS_YOY_FLAT_EPS = 0.001            # < 0.1% YoY change on a balance-sheet total = duplicate ingest
 PL_SCALE_JUMP_RATIO = 50.0         # >50x YoY on revenue/NI = base-year data error
-BS_RECONCILE_TOLERANCE = 0.01      # |A - (L + E)| / A > 1% = failed reconciliation
+BS_RECONCILE_TOLERANCE = 0.03      # |A - (L + E)| / A > 3% = error (typical Kenyan filings leave 1-3% in deferred-tax / minority-interest gaps)
+BS_RECONCILE_WARN_FLOOR = 0.005    # 0.5-3% gap = warn (probable incomplete liability mapping)
 
 
 # Result types ---------------------------------------------------------------
@@ -116,18 +118,44 @@ def validate_row(
     roe = _f(fs.return_on_equity)
     sector_is_bank = bool(company.sector and "bank" in company.sector.lower())
 
-    # 1. EPS vs NI/shares
+    # 1. EPS vs NI/shares. Two failure modes distinguished by direction:
+    #    (a) implied_shares >> stored (EPS too low)  -> interim EPS reported
+    #        against a full-year net income row (error)
+    #    (b) implied_shares << stored (EPS too high) -> pre-split/pre-bonus EPS
+    #        with post-event shares_outstanding stored today. We don't track
+    #        historical share counts per row, so this is a data-model limit,
+    #        not an ingest bug (warn).
+    #    (c) small mismatch (within ratio) but >10% EPS delta -> period mismatch (error).
     if shares and ni and eps:
-        implied = ni / shares
-        if implied and abs(implied - eps) / abs(implied) > EPS_TOLERANCE:
-            report.issues.append(
-                QualityIssue(
-                    "earnings_per_share",
-                    "error",
-                    f"EPS={eps:.2f} disagrees with NI/shares={implied:.2f} "
-                    f"(>{EPS_TOLERANCE:.0%}); probable period mismatch",
-                )
+        implied_eps = ni / shares
+        if implied_eps and abs(implied_eps - eps) / abs(implied_eps) > EPS_TOLERANCE:
+            implied_shares = ni / eps if eps else None
+            share_ratio = (
+                implied_shares / shares
+                if implied_shares and shares
+                else None
             )
+            # Only the pre-split / historical-shares case gets downgraded to warn.
+            if share_ratio is not None and share_ratio < 1.0 / EPS_SHARE_HISTORY_RATIO:
+                report.issues.append(
+                    QualityIssue(
+                        "earnings_per_share",
+                        "warn",
+                        f"EPS={eps:.2f} implies {implied_shares:,.0f} shares vs stored "
+                        f"{shares:,} ({share_ratio:.2f}x). Probable historical share "
+                        f"event (split/bonus/subdivision) without per-row share history; "
+                        f"stored shares_outstanding is post-event.",
+                    )
+                )
+            else:
+                report.issues.append(
+                    QualityIssue(
+                        "earnings_per_share",
+                        "error",
+                        f"EPS={eps:.2f} disagrees with NI/shares={implied_eps:.2f} "
+                        f"(>{EPS_TOLERANCE:.0%}); probable period mismatch",
+                    )
+                )
 
     # 2. BVPS vs equity/shares
     if shares and equity and bvps:
@@ -217,18 +245,21 @@ def validate_row(
                         )
                     )
 
-    # 4d. Balance-sheet reconciliation: Assets = Liabilities + Equity
-    # (within tolerance). This catches the most common ingest bug --
-    # one of the three totals being carried over from the wrong row,
-    # unit-mismatched, or missing entirely -- long before it corrupts
-    # the valuation model.
+    # 4d. Balance-sheet reconciliation: Assets = Liabilities + Equity.
+    #     Kenyan filings routinely report deferred tax and non-controlling
+    #     interest as separate line items that our current ingest doesn't
+    #     roll into `total_liabilities`, producing a persistent 1-3% gap.
+    #     Tiered response:
+    #       gap < 0.5%   -> pass
+    #       0.5% - 3%    -> warn (probable incomplete liability mapping)
+    #       >= 3%        -> error (one of the three totals is mis-ingested)
     total_assets = _f(fs.total_assets)
     total_liab = _f(fs.total_liabilities)
     if total_assets and total_liab and equity and total_assets > 0:
         implied_a = total_liab + equity
         diff = total_assets - implied_a
         rel = abs(diff) / total_assets
-        if rel > BS_RECONCILE_TOLERANCE:
+        if rel >= BS_RECONCILE_TOLERANCE:
             report.issues.append(
                 QualityIssue(
                     "total_assets",
@@ -238,6 +269,16 @@ def validate_row(
                     f"liabilities+equity={implied_a:.0f} "
                     f"(diff={diff:+.0f}, {rel:.2%} of assets); "
                     f"one of the three totals is mis-ingested",
+                )
+            )
+        elif rel >= BS_RECONCILE_WARN_FLOOR:
+            report.issues.append(
+                QualityIssue(
+                    "total_assets",
+                    "warn",
+                    f"Balance sheet gap: {rel:.2%} of assets "
+                    f"(diff={diff:+.0f}). Probable incomplete liability mapping "
+                    f"(deferred tax, non-controlling interest not rolled into total_liabilities).",
                 )
             )
 

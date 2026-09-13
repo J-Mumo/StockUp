@@ -116,6 +116,25 @@ class TestValidateEPS:
         eps_issues = [i for i in report.issues if i.field_name == "earnings_per_share"]
         assert eps_issues == []
 
+    def test_pre_split_eps_is_warn_not_error(self):
+        # IMH FY2014 pattern: pre-split EPS reported against a row whose stored
+        # shares_outstanding is post-split (4x higher). implied_shares << stored
+        # -> historical share event, no per-row share history: warn, not error.
+        company = _make_company(shares_outstanding=1_688_000_000)
+        fs = _make_fs(
+            net_income=5_320_885_000,     # FY2014 NI
+            earnings_per_share=13.56,      # implied_shares = 392M (0.23x stored)
+            shareholders_equity=25_000_000_000,
+        )
+
+        report = validate_row(fs, company)
+
+        eps_issues = [i for i in report.issues if i.field_name == "earnings_per_share"]
+        assert len(eps_issues) == 1
+        assert eps_issues[0].severity == "warn"
+        assert "historical share event" in eps_issues[0].message
+        assert report.ok  # no errors
+
 
 # --- validate_row: equity YoY sanity ---------------------------------------
 
@@ -211,6 +230,32 @@ class TestValidateBalanceSheetReconciliation:
             i.field_name == "total_assets" and "reconcile" in i.message
             for i in report.issues
         )
+
+    def test_small_bs_gap_is_warn_not_error(self):
+        """1-3% gap (typical Kenyan filings) is a warn, not an error.
+
+        This is the normal case when total_liabilities excludes deferred
+        tax / non-controlling interest, which are reported as separate
+        line items on Kenyan financial statements.
+        """
+        company = _make_company()
+        # 2% gap: assets 100, liabilities 78, equity 20 -> L+E = 98 (2% below A)
+        fs = _make_fs(
+            total_assets=100_000_000_000,
+            total_liabilities=78_000_000_000,
+            shareholders_equity=20_000_000_000,
+        )
+
+        report = validate_row(fs, company)
+
+        recon_issues = [
+            i for i in report.issues
+            if i.field_name == "total_assets"
+        ]
+        assert len(recon_issues) == 1
+        assert recon_issues[0].severity == "warn"
+        assert "gap" in recon_issues[0].message
+        assert report.ok  # warn only, no errors
 
 
 # --- validate_row: period type + sector_metrics ---------------------------
