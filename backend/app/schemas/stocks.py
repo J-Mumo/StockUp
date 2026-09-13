@@ -173,6 +173,10 @@ class FinancialStatementResponse(BaseModel):
     debt_to_equity: float | None = None
     current_ratio: float | None = None
 
+    # Sector-specific metrics (e.g. bank NPL ratio, CAR, cost-to-income).
+    # Free-form JSON dict; keys depend on the company's sector.
+    sector_metrics: dict[str, Any] | None = None
+
     notes: str | None = None
     report_date: date | None = None
     entered_by_user_id: int | None = None

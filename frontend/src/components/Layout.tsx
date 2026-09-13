@@ -1,6 +1,7 @@
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import { Toaster } from 'react-hot-toast';
+import LearnCard from './learn/LearnCard';
 
 export default function Layout() {
   return (
@@ -16,6 +17,7 @@ export default function Layout() {
       <main className="lg:ml-64 min-h-screen p-6 pt-16 lg:pt-6">
         <Outlet />
       </main>
+      <LearnCard />
     </div>
   );
 }

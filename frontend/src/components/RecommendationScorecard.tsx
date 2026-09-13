@@ -1,5 +1,8 @@
 import { useState } from 'react';
 import type { RecommendationDimensions, DimensionScore } from '../types';
+import { useLearnStore } from '../store/learnStore';
+import { getMetric } from '../lib/metrics/registry';
+import { Info } from 'lucide-react';
 
 /**
  * Four-dimensional recommendation scorecard.
@@ -11,6 +14,15 @@ import type { RecommendationDimensions, DimensionScore } from '../types';
 interface Props {
   dimensions: RecommendationDimensions;
 }
+
+// Maps a dimension's `name` (as returned by the backend) to the learn-mode
+// registry key so the ⓘ button opens the right explanation.
+const DIM_METRIC_KEY: Record<string, string> = {
+  Valuation: 'dim_valuation',
+  Quality: 'dim_quality',
+  Trend: 'dim_trend',
+  Position: 'dim_position',
+};
 
 const verdictColors: Record<string, string> = {
   'Strong Buy': 'bg-emerald-600 text-white',
@@ -35,6 +47,9 @@ function DimensionRow({ dim }: { dim: DimensionScore }) {
   const [open, setOpen] = useState(false);
   const width = dim.applicable && dim.score !== null ? `${dim.score}%` : '0%';
   const color = scoreColor(dim.score);
+  const openLearn = useLearnStore(s => s.open);
+  const metricKey = DIM_METRIC_KEY[dim.name];
+  const metric = metricKey ? getMetric(metricKey) : undefined;
 
   return (
     <div className="border border-dark-border rounded-lg overflow-hidden">
@@ -44,7 +59,30 @@ function DimensionRow({ dim }: { dim: DimensionScore }) {
         className="w-full text-left px-3 py-2 hover:bg-dark-bg transition-colors"
       >
         <div className="flex items-center justify-between mb-1.5">
-          <span className="text-sm font-medium text-gray-200">{dim.name}</span>
+          <span className="text-sm font-medium text-gray-200 inline-flex items-center gap-1.5">
+            {dim.name}
+            {metric && (
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openLearn({ metric, value: dim.applicable ? dim.score : null });
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.stopPropagation();
+                    openLearn({ metric, value: dim.applicable ? dim.score : null });
+                  }
+                }}
+                aria-label={`Learn about ${metric.label}`}
+                className="text-gray-500 hover:text-primary-400 transition-colors cursor-help"
+                title={metric.one_liner}
+              >
+                <Info size={12} />
+              </span>
+            )}
+          </span>
           <span className={`text-sm font-bold ${dim.applicable ? 'text-white' : 'text-gray-500'}`}>
             {dim.applicable && dim.score !== null ? `${dim.score}` : 'n/a'}
           </span>
@@ -87,11 +125,26 @@ export default function RecommendationScorecard({ dimensions }: Props) {
   const composite = dimensions.composite_score;
   const verdict = dimensions.composite_verdict;
   const verdictClass = (verdict && verdictColors[verdict]) || 'bg-gray-600 text-white';
+  const openLearn = useLearnStore(s => s.open);
+  const compositeMetric = getMetric('composite_score');
 
   return (
     <div className="mt-4 p-4 bg-dark-bg rounded-lg">
       <div className="flex items-center justify-between mb-3">
-        <p className="text-sm text-gray-400">4-dimension scorecard</p>
+        <p className="text-sm text-gray-400 inline-flex items-center gap-1.5">
+          4-dimension scorecard
+          {compositeMetric && (
+            <button
+              type="button"
+              onClick={() => openLearn({ metric: compositeMetric, value: composite })}
+              aria-label="Learn about the composite scorecard"
+              title={compositeMetric.one_liner}
+              className="text-gray-500 hover:text-primary-400 transition-colors"
+            >
+              <Info size={12} />
+            </button>
+          )}
+        </p>
         {composite !== null && verdict && (
           <div className="flex items-center gap-2">
             <span className={`px-2 py-0.5 rounded text-xs font-semibold ${verdictClass}`}>

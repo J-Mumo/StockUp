@@ -4,6 +4,7 @@ import { Search, Filter, Building2 } from 'lucide-react';
 import { stocksApi } from '../lib/services';
 import type { Company } from '../types';
 import { SkeletonTable } from '../components/ui/LoadingSpinner';
+import MetricLabel from '../components/learn/MetricLabel';
 
 function formatKES(value: number | null): string {
   if (value == null) return '—';
@@ -54,8 +55,12 @@ function CompanySection({ title, companies, badge }: CompanySectionProps) {
                 <th className="px-4 py-3 font-medium">Ticker</th>
                 <th className="px-4 py-3 font-medium">Sector</th>
                 <th className="px-4 py-3 font-medium text-right">Market Price</th>
-                <th className="px-4 py-3 font-medium text-right">Intrinsic Value</th>
-                <th className="px-4 py-3 font-medium text-right">Margin of Safety</th>
+                <th className="px-4 py-3 font-medium text-right">
+                  <MetricLabel as="span" metricKey="weighted_intrinsic_value" labelOverride="Intrinsic Value" hideOneLiner />
+                </th>
+                <th className="px-4 py-3 font-medium text-right">
+                  <MetricLabel as="span" metricKey="margin_of_safety_pct" labelOverride="Margin of Safety" hideOneLiner />
+                </th>
                 <th className="px-4 py-3 font-medium text-center">Signal</th>
               </tr>
             </thead>

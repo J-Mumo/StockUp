@@ -7,6 +7,7 @@ import { portfolioApi, stocksApi } from '../lib/services';
 import type { Portfolio, Holding, HoldingsListResponse, Transaction, PortfolioPerformance, Company, RealizedListResponse, RealizedPosition } from '../types';
 import { SkeletonCard, PageLoader } from '../components/ui/LoadingSpinner';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import MetricLabel from '../components/learn/MetricLabel';
 
 interface TransactionForm {
   company_id: number;
@@ -330,7 +331,9 @@ export default function PortfolioPage() {
                         <th className="pb-3 font-medium text-right">Avg Cost</th>
                         <th className="pb-3 font-medium text-right">Current</th>
                         <th className="pb-3 font-medium text-right">Gain/Loss</th>
-                        <th className="pb-3 font-medium text-right">Margin of Safety</th>
+                        <th className="pb-3 font-medium text-right">
+                          <MetricLabel as="span" metricKey="margin_of_safety_pct" labelOverride="Margin of Safety" hideOneLiner />
+                        </th>
                       </tr>
                     </thead>
                     <tbody>

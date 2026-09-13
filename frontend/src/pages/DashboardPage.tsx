@@ -4,6 +4,7 @@ import { Briefcase, Bell, Eye, TrendingDown, BarChart3, Building2 } from 'lucide
 import { dashboardApi } from '../lib/services';
 import type { DashboardSummary } from '../types';
 import { SkeletonCard } from '../components/ui/LoadingSpinner';
+import MetricLabel from '../components/learn/MetricLabel';
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardSummary | null>(null);
@@ -124,8 +125,12 @@ export default function DashboardPage() {
                   <th className="pb-3 font-medium">Company</th>
                   <th className="pb-3 font-medium">Symbol</th>
                   <th className="pb-3 font-medium text-right">Market Price</th>
-                  <th className="pb-3 font-medium text-right">Intrinsic Value</th>
-                  <th className="pb-3 font-medium text-right">Margin of Safety</th>
+                  <th className="pb-3 font-medium text-right">
+                    <MetricLabel as="span" metricKey="weighted_intrinsic_value" labelOverride="Intrinsic Value" hideOneLiner />
+                  </th>
+                  <th className="pb-3 font-medium text-right">
+                    <MetricLabel as="span" metricKey="margin_of_safety_pct" labelOverride="Margin of Safety" hideOneLiner />
+                  </th>
                   <th className="pb-3 font-medium text-right">Recommendation</th>
                 </tr>
               </thead>

@@ -11,6 +11,7 @@ import FinancialEntryPage from './pages/FinancialEntryPage';
 import PortfolioPage from './pages/PortfolioPage';
 import AlertsPage from './pages/AlertsPage';
 import WatchlistsPage from './pages/WatchlistsPage';
+import LearnPage from './pages/LearnPage';
 
 function App() {
   return (
@@ -36,6 +37,7 @@ function App() {
           <Route path="/portfolio" element={<PortfolioPage />} />
           <Route path="/alerts" element={<AlertsPage />} />
           <Route path="/watchlists" element={<WatchlistsPage />} />
+          <Route path="/learn" element={<LearnPage />} />
         </Route>
 
         {/* Catch-all */}

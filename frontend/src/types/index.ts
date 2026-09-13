@@ -85,6 +85,9 @@ export interface FinancialStatement {
   return_on_equity: number | null;
   debt_to_equity: number | null;
   current_ratio: number | null;
+  // Free-form sector-specific metrics (e.g. bank: npl_ratio, capital_adequacy_ratio,
+  // cost_to_income, cost_of_risk, tier1_ratio, net_interest_margin).
+  sector_metrics: Record<string, number | null> | null;
   notes: string | null;
   report_date: string | null;
   entered_by_user_id: number | null;

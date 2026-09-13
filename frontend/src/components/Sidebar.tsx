@@ -9,9 +9,12 @@ import {
   TrendingUp,
   Menu,
   X,
+  BookOpen,
+  GraduationCap,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuthStore } from '../store/authStore';
+import { useLearnStore } from '../store/learnStore';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -19,12 +22,15 @@ const navItems = [
   { to: '/portfolio', icon: Briefcase, label: 'Portfolio' },
   { to: '/alerts', icon: Bell, label: 'Alerts' },
   { to: '/watchlists', icon: Eye, label: 'Watchlists' },
+  { to: '/learn', icon: BookOpen, label: 'Learn' },
 ];
 
 export default function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const logout = useAuthStore((s) => s.logout);
   const navigate = useNavigate();
+  const learnEnabled = useLearnStore(s => s.enabled);
+  const toggleLearn = useLearnStore(s => s.toggle);
 
   const handleLogout = () => {
     logout();
@@ -79,7 +85,28 @@ export default function Sidebar() {
           ))}
         </nav>
 
-        <div className="absolute bottom-0 left-0 right-0 p-3 border-t border-dark-border">
+        <div className="absolute bottom-0 left-0 right-0 p-3 border-t border-dark-border space-y-1">
+          <button
+            onClick={toggleLearn}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg w-full transition-colors ${
+              learnEnabled
+                ? 'bg-primary-600/20 text-primary-300'
+                : 'text-gray-400 hover:bg-dark-border/50 hover:text-gray-200'
+            }`}
+            title="Show plain-English explanations for every metric"
+          >
+            <GraduationCap size={20} />
+            <span className="font-medium flex-1 text-left">Learn Mode</span>
+            <span
+              className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                learnEnabled
+                  ? 'bg-primary-500/30 text-primary-200'
+                  : 'bg-dark-border/60 text-gray-500'
+              }`}
+            >
+              {learnEnabled ? 'ON' : 'OFF'}
+            </span>
+          </button>
           <button
             onClick={handleLogout}
             className="flex items-center gap-3 px-3 py-2.5 rounded-lg w-full text-gray-400 hover:bg-dark-border/50 hover:text-gray-200 transition-colors"

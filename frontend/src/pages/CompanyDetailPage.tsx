@@ -10,6 +10,8 @@ import type { CompanyDetail, PriceHistory, FinancialStatement, IntrinsicValue, R
 import { PageLoader } from '../components/ui/LoadingSpinner';
 import GoalsSection from '../components/GoalsSection';
 import RecommendationScorecard from '../components/RecommendationScorecard';
+import MetricLabel from '../components/learn/MetricLabel';
+import BankHealthCard from '../components/BankHealthCard';
 
 type TimePeriod = '1D' | '5D' | '1M' | '6M' | 'YTD' | '1Y' | '5Y' | 'ALL';
 
@@ -739,6 +741,11 @@ export default function CompanyDetailPage() {
       )}
 
       {/* Valuation Section */}
+      <BankHealthCard
+        latestFinancial={latestFinancial}
+        sector={company?.sector ?? null}
+        companyName={company?.name}
+      />
       <div className="bg-dark-surface border border-dark-border rounded-xl p-6 mb-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
@@ -783,7 +790,13 @@ export default function CompanyDetailPage() {
             {/* Primary metrics */}
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
               <div className="p-3 bg-dark-bg rounded-lg">
-                <p className="text-xs text-gray-400 mb-1">Intrinsic Value</p>
+                <MetricLabel
+                  metricKey="weighted_intrinsic_value"
+                  value={valuation.weighted_intrinsic_value}
+                  contextLabel={company?.name}
+                  sector={company?.sector ?? null}
+                  className="mb-1"
+                />
                 <p className="text-lg font-bold text-white">
                   {fmtKES(valuation.weighted_intrinsic_value)}
                 </p>
@@ -815,7 +828,13 @@ export default function CompanyDetailPage() {
                 )}
               </div>
               <div className="p-3 bg-dark-bg rounded-lg">
-                <p className="text-xs text-gray-400 mb-1">Margin of Safety</p>
+                <MetricLabel
+                  metricKey="margin_of_safety_pct"
+                  value={valuation.margin_of_safety_pct}
+                  contextLabel={company?.name}
+                  sector={company?.sector ?? null}
+                  className="mb-1"
+                />
                 <p className={`text-lg font-bold ${(valuation.margin_of_safety_pct ?? 0) > 0 ? 'text-gain' : 'text-loss'}`}>
                   {fmtPct(valuation.margin_of_safety_pct)}
                 </p>
@@ -827,27 +846,45 @@ export default function CompanyDetailPage() {
                 </p>
               </div>
               <div className="p-3 bg-dark-bg rounded-lg">
-                <p className="text-xs text-gray-400 mb-1">
-                  {valuation.model_used === 'bank_residual_income'
-                    ? 'Residual Income'
-                    : 'DCF Value'}
-                </p>
+                {valuation.model_used === 'bank_residual_income' ? (
+                  <p className="text-xs text-gray-400 mb-1">Residual Income</p>
+                ) : (
+                  <MetricLabel
+                    metricKey="dcf_value"
+                    value={valuation.dcf_value}
+                    contextLabel={company?.name}
+                    sector={company?.sector ?? null}
+                    className="mb-1"
+                  />
+                )}
                 <p className={`text-lg font-bold ${valuation.dcf_value ? 'text-blue-400' : 'text-gray-500'}`}>
                   {valuation.dcf_value ? fmtKES(valuation.dcf_value) : '—'}
                 </p>
               </div>
               <div className="p-3 bg-dark-bg rounded-lg">
-                <p className="text-xs text-gray-400 mb-1">
-                  {valuation.model_used === 'bank_residual_income'
-                    ? 'Justified P/B'
-                    : 'EPV Value'}
-                </p>
+                {valuation.model_used === 'bank_residual_income' ? (
+                  <p className="text-xs text-gray-400 mb-1">Justified P/B</p>
+                ) : (
+                  <MetricLabel
+                    metricKey="epv_value"
+                    value={valuation.epv_value}
+                    contextLabel={company?.name}
+                    sector={company?.sector ?? null}
+                    className="mb-1"
+                  />
+                )}
                 <p className={`text-lg font-bold ${valuation.epv_value ? 'text-teal-400' : 'text-gray-500'}`}>
                   {valuation.epv_value ? fmtKES(valuation.epv_value) : '—'}
                 </p>
               </div>
               <div className="p-3 bg-dark-bg rounded-lg">
-                <p className="text-xs text-gray-400 mb-1">Book Value</p>
+                <MetricLabel
+                  metricKey="book_value_estimate"
+                  value={valuation.book_value_estimate}
+                  contextLabel={company?.name}
+                  sector={company?.sector ?? null}
+                  className="mb-1"
+                />
                 <p className={`text-lg font-bold ${valuation.book_value_estimate && valuation.book_value_estimate > 0 ? 'text-amber-400' : 'text-loss'}`}>
                   {valuation.book_value_estimate ? fmtKES(valuation.book_value_estimate) : '—'}
                 </p>
@@ -1132,17 +1169,37 @@ export default function CompanyDetailPage() {
               <thead>
                 <tr className="text-left text-xs text-gray-400 border-b border-dark-border">
                   <th className="pb-3 font-medium sticky left-0 bg-dark-surface">Year</th>
-                  <th className="pb-3 font-medium px-2">Revenue</th>
-                  <th className="pb-3 font-medium px-2">Net Income</th>
-                  <th className="pb-3 font-medium px-2">EPS</th>
-                  <th className="pb-3 font-medium px-2">FCF</th>
-                  <th className="pb-3 font-medium px-2">OCF</th>
-                  <th className="pb-3 font-medium px-2">CapEx</th>
+                  <th className="pb-3 font-medium px-2">
+                    <MetricLabel as="span" metricKey="revenue" labelOverride="Revenue" hideOneLiner sector={company?.sector ?? null} />
+                  </th>
+                  <th className="pb-3 font-medium px-2">
+                    <MetricLabel as="span" metricKey="net_income" labelOverride="Net Income" hideOneLiner sector={company?.sector ?? null} />
+                  </th>
+                  <th className="pb-3 font-medium px-2">
+                    <MetricLabel as="span" metricKey="earnings_per_share" labelOverride="EPS" hideOneLiner sector={company?.sector ?? null} />
+                  </th>
+                  <th className="pb-3 font-medium px-2">
+                    <MetricLabel as="span" metricKey="free_cash_flow" labelOverride="FCF" hideOneLiner sector={company?.sector ?? null} />
+                  </th>
+                  <th className="pb-3 font-medium px-2">
+                    <MetricLabel as="span" metricKey="operating_cash_flow" labelOverride="OCF" hideOneLiner sector={company?.sector ?? null} />
+                  </th>
+                  <th className="pb-3 font-medium px-2">
+                    <MetricLabel as="span" metricKey="capital_expenditures" labelOverride="CapEx" hideOneLiner sector={company?.sector ?? null} />
+                  </th>
                   <th className="pb-3 font-medium px-2">Equity</th>
-                  <th className="pb-3 font-medium px-2">BVPS</th>
-                  <th className="pb-3 font-medium px-2">D/E</th>
-                  <th className="pb-3 font-medium px-2">ROE</th>
-                  <th className="pb-3 font-medium px-2">DPS</th>
+                  <th className="pb-3 font-medium px-2">
+                    <MetricLabel as="span" metricKey="book_value_per_share" labelOverride="BVPS" hideOneLiner sector={company?.sector ?? null} />
+                  </th>
+                  <th className="pb-3 font-medium px-2">
+                    <MetricLabel as="span" metricKey="debt_to_equity" labelOverride="D/E" hideOneLiner sector={company?.sector ?? null} />
+                  </th>
+                  <th className="pb-3 font-medium px-2">
+                    <MetricLabel as="span" metricKey="return_on_equity" labelOverride="ROE" hideOneLiner sector={company?.sector ?? null} />
+                  </th>
+                  <th className="pb-3 font-medium px-2">
+                    <MetricLabel as="span" metricKey="dividends_per_share" labelOverride="DPS" hideOneLiner sector={company?.sector ?? null} />
+                  </th>
                   <th className="pb-3 font-medium px-2">Source</th>
                   <th className="pb-3 font-medium px-2"></th>
                 </tr>
