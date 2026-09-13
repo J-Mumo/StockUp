@@ -186,6 +186,10 @@ class Recommendation:
     reason: str
     margin_of_safety_pct: float | None = None
     quality: QualityAssessment = field(default_factory=QualityAssessment)
+    # Optional 4-dimensional scorecard. Populated by callers that pass price
+    # history / portfolio context to compute_recommendation_with_dimensions().
+    # Kept as a dict (not a dataclass) to keep this module dependency-free.
+    dimensions: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -193,6 +197,7 @@ class Recommendation:
             "reason": self.reason,
             "margin_of_safety_pct": self.margin_of_safety_pct,
             "quality": self.quality.to_dict(),
+            "dimensions": self.dimensions,
         }
 
 

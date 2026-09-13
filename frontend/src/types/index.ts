@@ -130,6 +130,30 @@ export interface Recommendation {
     detail: string;
   }>;
   sector_kind?: string | null;
+  dimensions?: RecommendationDimensions | null;
+}
+
+export interface DimensionDriver {
+  name: string;
+  value: number | string | null;
+  passed: boolean | null;
+  detail: string;
+}
+
+export interface DimensionScore {
+  name: string;
+  score: number | null;         // 0-100 or null when inapplicable
+  applicable: boolean;
+  drivers: DimensionDriver[];
+}
+
+export interface RecommendationDimensions {
+  valuation: DimensionScore;
+  quality: DimensionScore;
+  trend: DimensionScore;
+  position: DimensionScore;
+  composite_score: number | null;
+  composite_verdict: string | null;
 }
 
 export interface Portfolio {

@@ -9,18 +9,20 @@ Provides:
 from __future__ import annotations
 
 from datetime import date
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, get_optional_user
 from app.models.analysis_snapshot import AnalysisSnapshot
 from app.models.company import Company
 from app.models.financial_statement import FinancialStatement
 from app.models.intrinsic_value import IntrinsicValue
+from app.models.portfolio import Portfolio, PortfolioTransaction
+from app.models.price_history import PriceHistory
 from app.models.user import User
 from app.routers.alerts import check_and_trigger_alerts
 from app.schemas.analysis import (
@@ -31,6 +33,10 @@ from app.schemas.analysis import (
 )
 from app.schemas.stocks import ValuationResponse
 from app.services import valuation_engine, recommendation_engine
+from app.services.recommendation_dimensions import (
+    PortfolioContext,
+    compute_dimensions,
+)
 
 router = APIRouter(prefix="/api/analysis", tags=["analysis"])
 
@@ -138,8 +144,14 @@ def compute_valuation(
 def get_recommendation(
     company_id: int,
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_user),
 ):
-    """Get the current recommendation for a company based on latest valuation."""
+    """Get the current recommendation for a company based on latest valuation.
+
+    Anonymous callers get the classical MOS+quality verdict plus the
+    Valuation / Quality / Trend dimensions. Authenticated callers also get
+    the Position dimension scored against their portfolio.
+    """
     company = db.query(Company).filter(Company.id == company_id).first()
     if company is None:
         raise HTTPException(status_code=404, detail="Company not found")
@@ -162,6 +174,36 @@ def get_recommendation(
 
     rec = recommendation_engine.generate_recommendation(mos, financials, sector=company.sector)
 
+    # ---- 4-dimensional scorecard ----
+    prices = (
+        db.query(PriceHistory)
+        .filter(PriceHistory.company_id == company_id)
+        .order_by(PriceHistory.price_date)
+        .all()
+    )
+    valuation_extras: dict[str, Any] = {}
+    if latest_iv is not None:
+        if latest_iv.weighted_intrinsic_value is not None:
+            valuation_extras["weighted_intrinsic_value"] = float(latest_iv.weighted_intrinsic_value)
+        if latest_iv.current_market_price is not None:
+            valuation_extras["current_market_price"] = float(latest_iv.current_market_price)
+
+    portfolio_ctx = _build_portfolio_context(
+        db, current_user, company_id, company.sector,
+    )
+
+    dims = compute_dimensions(
+        mos=mos,
+        quality_score=rec.quality.score,
+        quality_max_score=rec.quality.max_score,
+        quality_subscores=rec.quality.subscores(),
+        prices=prices,
+        financials=financials,
+        position=portfolio_ctx,
+        sector=company.sector,
+        valuation_extras=valuation_extras or None,
+    )
+
     return RecommendationResponse(
         action=rec.action,
         reason=rec.reason,
@@ -171,6 +213,119 @@ def get_recommendation(
         quality_factors=[f.to_dict() for f in rec.quality.factors],
         quality_subscores=rec.quality.subscores(),
         sector_kind=rec.quality.sector_kind,
+        dimensions=dims.to_dict(),
+    )
+
+
+def _build_portfolio_context(
+    db: Session,
+    user: User | None,
+    company_id: int,
+    sector: str | None,
+) -> PortfolioContext | None:
+    """Aggregate the user's live position + portfolio context for one company.
+
+    Returns None if there's no authenticated user. If the user is authenticated
+    but doesn't hold the security, returns a context with ``net_qty = 0`` so
+    the Position scorer can render the "no position" tile.
+    """
+    if user is None:
+        return None
+
+    # All user portfolios (usually one, but portfolios are a first-class table).
+    portfolio_ids = [
+        p.id for p in db.query(Portfolio).filter(Portfolio.user_id == user.id).all()
+    ]
+    if not portfolio_ids:
+        return PortfolioContext(net_qty=0.0)
+
+    # Aggregate net qty and cost basis for THIS company.
+    txns = (
+        db.query(PortfolioTransaction)
+        .filter(
+            PortfolioTransaction.portfolio_id.in_(portfolio_ids),
+            PortfolioTransaction.company_id == company_id,
+        )
+        .order_by(PortfolioTransaction.transaction_date)
+        .all()
+    )
+    net_qty = 0.0
+    total_cost = 0.0
+    for t in txns:
+        qty = float(t.quantity)
+        price = float(t.price_per_share)
+        if t.transaction_type == "buy":
+            net_qty += qty
+            total_cost += qty * price
+        elif t.transaction_type == "sell":
+            # Reduce cost basis proportionally.
+            if net_qty > 0:
+                avg = total_cost / net_qty
+                total_cost -= min(qty, net_qty) * avg
+            net_qty -= qty
+    avg_cost = (total_cost / net_qty) if net_qty > 0 else None
+
+    # Current price for this company.
+    latest_price_row = (
+        db.query(PriceHistory)
+        .filter(PriceHistory.company_id == company_id)
+        .order_by(desc(PriceHistory.price_date))
+        .first()
+    )
+    current_price = (
+        float(latest_price_row.close_price) if latest_price_row is not None else None
+    )
+
+    # Portfolio + sector totals mark-to-market.
+    all_txns = (
+        db.query(PortfolioTransaction)
+        .filter(PortfolioTransaction.portfolio_id.in_(portfolio_ids))
+        .all()
+    )
+    # net qty per company
+    per_company: dict[int, float] = {}
+    for t in all_txns:
+        delta = float(t.quantity) if t.transaction_type == "buy" else -float(t.quantity)
+        per_company[t.company_id] = per_company.get(t.company_id, 0.0) + delta
+
+    portfolio_value = 0.0
+    sector_value = 0.0
+    if per_company:
+        held_ids = [cid for cid, q in per_company.items() if q > 0]
+        if held_ids:
+            # Latest prices for held companies.
+            latest_prices: dict[int, float] = {}
+            for cid in held_ids:
+                p = (
+                    db.query(PriceHistory)
+                    .filter(PriceHistory.company_id == cid)
+                    .order_by(desc(PriceHistory.price_date))
+                    .first()
+                )
+                if p is not None:
+                    latest_prices[cid] = float(p.close_price)
+            # Companies for sector lookup.
+            sector_by_id: dict[int, str | None] = {}
+            if sector is not None:
+                held_companies = (
+                    db.query(Company).filter(Company.id.in_(held_ids)).all()
+                )
+                sector_by_id = {c.id: c.sector for c in held_companies}
+            for cid in held_ids:
+                price = latest_prices.get(cid)
+                if price is None:
+                    continue
+                mv = per_company[cid] * price
+                portfolio_value += mv
+                if sector is not None and sector_by_id.get(cid) == sector:
+                    sector_value += mv
+
+    return PortfolioContext(
+        net_qty=net_qty,
+        avg_cost=avg_cost,
+        current_price=current_price,
+        portfolio_value=portfolio_value or None,
+        sector_value=sector_value if sector is not None else None,
     )
 
 

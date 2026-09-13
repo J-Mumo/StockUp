@@ -121,3 +121,8 @@ class RecommendationResponse(BaseModel):
     # ``{name, score, max_score, passed, applicable, detail}``.
     quality_subscores: list[dict[str, Any]] = []
     sector_kind: str | None = None
+    # 4-dimensional scorecard: {valuation, quality, trend, position,
+    # composite_score, composite_verdict}. Each dimension is
+    # {name, score (0-100 or null), applicable, drivers[]}. See
+    # plans/recommendation-4d.md.
+    dimensions: dict[str, Any] | None = None

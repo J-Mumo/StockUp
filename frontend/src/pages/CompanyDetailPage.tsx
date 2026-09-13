@@ -9,6 +9,7 @@ import { stocksApi, analysisApi, portfolioApi, notesApi, companyChatApi } from '
 import type { CompanyDetail, PriceHistory, FinancialStatement, IntrinsicValue, Recommendation, ValuationTrendPoint, Holding, Portfolio, CompanyNote, CompanyChatMessage, OnlineValidationSummary, CompanyChatContextMeta } from '../types';
 import { PageLoader } from '../components/ui/LoadingSpinner';
 import GoalsSection from '../components/GoalsSection';
+import RecommendationScorecard from '../components/RecommendationScorecard';
 
 type TimePeriod = '1D' | '5D' | '1M' | '6M' | 'YTD' | '1Y' | '5Y' | 'ALL';
 
@@ -1001,6 +1002,9 @@ export default function CompanyDetailPage() {
           <div className="mt-4 p-4 bg-dark-bg rounded-lg">
             <p className="text-sm text-gray-400 mb-2">Analysis:</p>
             <p className="text-gray-300 text-sm">{recommendation.reason}</p>
+            {recommendation.dimensions && (
+              <RecommendationScorecard dimensions={recommendation.dimensions} />
+            )}
             {recommendation.quality_factors.length > 0 && (
               <div className="mt-3">
                 <p className="text-sm text-gray-400 mb-1">
