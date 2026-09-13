@@ -33,6 +33,7 @@ def _make_fs(
     dividends_per_share: float | None = None,
     current_ratio: float | None = None,
     revenue: float | None = None,
+    total_liabilities: float | None = None,
 ) -> FinancialStatement:
     """Create a mock FinancialStatement for testing."""
     fs = MagicMock(spec=FinancialStatement)
@@ -51,7 +52,8 @@ def _make_fs(
     fs.capital_expenditures = None
     fs.earnings_per_share = None
     fs.total_assets = None
-    fs.total_liabilities = None
+    fs.total_liabilities = total_liabilities
+    fs.sector_metrics = None
     return fs
 
 
@@ -65,7 +67,13 @@ def _make_quality_financials(
     cr: float = 1.5,
     years: int = 5,
 ) -> list[FinancialStatement]:
-    """Create financials that represent a quality company."""
+    """Create financials that represent a quality company.
+
+    Populates enough fields for every one of the 10 industrial quality
+    factors to resolve as available (not ``insufficient_data``):
+    - revenue = base_income * 3   (FCF/rev = 20% > 5% threshold)
+    - total_liabilities = base_income * 2  (< 4x NI conservative-debt bar)
+    """
     return [
         _make_fs(
             fiscal_year=2021 + i,
@@ -75,6 +83,8 @@ def _make_quality_financials(
             free_cash_flow=fcf_base * ((1 + growth) ** i),
             dividends_per_share=dps,
             current_ratio=cr,
+            revenue=base_income * 3 * ((1 + growth) ** i),
+            total_liabilities=base_income * 2 * ((1 + growth) ** i),
         )
         for i in range(years)
     ]
@@ -86,11 +96,14 @@ def _make_quality_financials(
 
 class TestQualityAssessment:
     def test_high_quality_company(self):
-        """Company meeting all quality criteria scores 6/6."""
+        """Company meeting all quality criteria scores 10/10."""
         financials = _make_quality_financials()
         quality = assess_quality(financials)
 
-        assert quality.score == 6
+        assert quality.score == 10
+        assert quality.max_score == 10
+        assert len(quality.factors) == 10
+        assert all(f.passed for f in quality.factors)
         assert quality.has_high_roe is True
         assert quality.has_low_leverage is True
         assert quality.has_earnings_growth is True
@@ -126,7 +139,7 @@ class TestQualityAssessment:
         """Empty financials → all factors fail gracefully."""
         quality = assess_quality([])
         assert quality.score == 0
-        assert len(quality.factors) == 6  # All 6 factors still assessed
+        assert len(quality.factors) == 10  # All 10 factors still assessed
 
 
 class TestROEFactor:
@@ -265,18 +278,18 @@ class TestRecommendationMatrix:
         assert "Deep value" in rec.reason
 
     def test_buy_with_quality(self):
-        """MOS > 30% + ROE > 15% but D/E > 0.5 → Buy."""
+        """MOS > 30% + all core quality factors pass but D/E > 0.5 → Buy."""
         financials = _make_quality_financials(roe=0.20, de=0.70)
         rec = generate_recommendation(0.35, financials)
         assert rec.action == "Buy"
-        assert "strong earnings quality" in rec.reason
+        assert "core quality factors pass" in rec.reason
 
     def test_buy_no_quality(self):
-        """MOS > 30% but low ROE → still Buy (on value alone)."""
+        """MOS > 30% but a core factor fails → Hold (value-trap gate)."""
         financials = _make_quality_financials(roe=0.08, de=0.70)
         rec = generate_recommendation(0.40, financials)
-        assert rec.action == "Buy"
-        assert "quality score" in rec.reason
+        assert rec.action == "Hold"
+        assert "quality gate" in rec.reason
 
     def test_accumulate(self):
         """MOS 10-30% + ROE > 15% → Accumulate."""
@@ -285,8 +298,10 @@ class TestRecommendationMatrix:
         assert rec.action == "Accumulate"
 
     def test_hold_moderate_mos_low_quality(self):
-        """MOS 10-30% but low ROE → Hold."""
-        financials = _make_quality_financials(roe=0.08)
+        """MOS 10-30% with multiple core-factor failures → Hold."""
+        # Low ROE + negative FCF fails ROE, FCF-increasing and capital-efficiency
+        # → 3 core failures, dropping below the 4/5 Accumulate threshold.
+        financials = _make_quality_financials(roe=0.08, fcf_base=-1e9)
         rec = generate_recommendation(0.15, financials)
         assert rec.action == "Hold"
 
@@ -358,8 +373,8 @@ class TestRecommendationOutput:
 
         assert rec.quality is not None
         assert rec.quality.score >= 0
-        assert rec.quality.max_score == 6
-        assert len(rec.quality.factors) == 6
+        assert rec.quality.max_score == 10
+        assert len(rec.quality.factors) == 10
 
     def test_to_dict_serialization(self):
         """Recommendation serializes to dict correctly."""
