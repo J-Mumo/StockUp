@@ -495,9 +495,19 @@ export default function CompanyDetailPage() {
     'Accumulate': 'bg-emerald-500',
     'Hold': 'bg-yellow-500',
     'Hold/Trim': 'bg-orange-500',
+    'Trim': 'bg-orange-500',
+    'Avoid': 'bg-red-500',
     'Sell': 'bg-red-500',
     'Strong Sell': 'bg-red-600',
   };
+
+  // The 4-dimension scorecard is the source of truth for the recommendation.
+  // The header badge and the analysis card must show the same verdict, so
+  // prefer the composite verdict whenever dimensions are available and fall
+  // back to the legacy MOS+quality-gate action only when they aren't.
+  const displayAction = recommendation?.dimensions?.composite_verdict
+    ?? recommendation?.action
+    ?? null;
 
   const tvGreen = '#26a69a';
   const tvRed = '#ef5350';
@@ -535,9 +545,9 @@ export default function CompanyDetailPage() {
             <p className="text-gray-500 text-sm mt-1 line-clamp-2">{company.description}</p>
           )}
         </div>
-        {recommendation && recommendation.action && (
-          <span className={`px-3 py-1.5 rounded-lg text-white text-sm font-medium ${recColors[recommendation.action] || 'bg-gray-500'}`}>
-            {recommendation.action}
+        {displayAction && (
+          <span className={`px-3 py-1.5 rounded-lg text-white text-sm font-medium ${recColors[displayAction] || 'bg-gray-500'}`}>
+            {displayAction}
           </span>
         )}
       </div>
