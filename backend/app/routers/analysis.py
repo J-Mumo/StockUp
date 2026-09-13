@@ -100,9 +100,11 @@ def compute_valuation(
         .order_by(FinancialStatement.fiscal_year)
         .all()
     )
+    company = db.query(Company).filter(Company.id == company_id).first()
     rec = recommendation_engine.generate_recommendation(
         result.margin_of_safety_pct,
         financials,
+        sector=company.sector if company else None,
     )
 
     # Update the latest IntrinsicValue record with recommendation
@@ -158,7 +160,7 @@ def get_recommendation(
         .all()
     )
 
-    rec = recommendation_engine.generate_recommendation(mos, financials)
+    rec = recommendation_engine.generate_recommendation(mos, financials, sector=company.sector)
 
     return RecommendationResponse(
         action=rec.action,
@@ -291,6 +293,8 @@ def _iv_to_response(iv) -> ValuationResponse:
         margin_of_safety_pct=float(iv.margin_of_safety_pct) if iv.margin_of_safety_pct is not None else None,
         recommendation=iv.recommendation,
         recommendation_reason=iv.recommendation_reason,
+        model_used=getattr(iv, "model_used", None),
+        scenario_values=getattr(iv, "scenario_values", None),
         assumptions=iv.assumptions,
         calculation_details=iv.calculation_details,
         calculated_at=iv.calculated_at,

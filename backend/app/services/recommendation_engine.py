@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 
 from app.models.company import Company
 from app.models.financial_statement import FinancialStatement
+from app.services.valuation.sectors import SectorKind, classify_sector
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +124,30 @@ class Recommendation:
 # ---------------------------------------------------------------------------
 
 def assess_quality(
+    financials: list[FinancialStatement],
+    sector: str | None = None,
+) -> QualityAssessment:
+    """Assess quality factors from financial statements.
+
+    Dispatches to a sector-specific implementation. Unknown or missing
+    sectors default to the industrial factor set for backward compatibility.
+
+    Args:
+        financials: List of FinancialStatement objects (any order).
+        sector: Free-form sector string from ``Company.sector``. When
+            ``None`` (or unknown), the industrial factor set is used —
+            matching pre-sector-dispatcher behaviour.
+
+    Returns:
+        QualityAssessment with individual factor results.
+    """
+    kind = classify_sector(sector)
+    if kind == SectorKind.BANK:
+        return _assess_bank_quality(financials)
+    return _assess_industrial_quality(financials)
+
+
+def _assess_industrial_quality(
     financials: list[FinancialStatement],
 ) -> QualityAssessment:
     """Assess quality factors from financial statements.
@@ -523,12 +548,288 @@ def _assess_capital_efficiency(financials: list[FinancialStatement]) -> QualityS
 
 
 # ---------------------------------------------------------------------------
+# Bank Quality Assessment (Phase 1 of sector-specific models)
+#
+# For banks, the industrial quality gate is inappropriate:
+#   - Customer deposits are inputs, not "debt". Liabilities/NI is meaningless.
+#   - Free cash flow is not a proxy for owner earnings.
+#   - Capital adequacy, asset quality and cost-of-risk are the right lenses.
+#
+# We reuse the 10-slot QualityAssessment shape so downstream code (frontend
+# rendering, recommendation gate) doesn't need to change. Slot semantics are
+# repurposed for banks — see the mapping below. Slots that have no bank
+# analogue are marked ``insufficient_data=True`` so the gate correctly skips
+# them (the gate already handles missing factors gracefully).
+#
+# Slot → industrial → bank meaning
+#   0  → ROE > 15%                → ROE > 18%
+#   1  → D/E < 0.5                → Capital adequacy > 14.5%
+#   2  → earnings growth          → earnings growth (unchanged)
+#   3  → FCF positive/growing     → healthy asset quality (NPL < 15%, CoR < 2%)
+#   4  → dividend consistency     → dividend consistency (unchanged)
+#   5  → current ratio > 1        → *n/a for banks* (marked insufficient)
+#   6  → FCF increasing 3yrs      → earning-asset growth (loans/deposits)
+#   7  → revenue consistency      → net-interest-income growth
+#   8  → conservative debt        → *n/a for banks* (marked insufficient)
+#   9  → capital efficiency       → operating efficiency (cost/income < 55%)
+# ---------------------------------------------------------------------------
+
+
+def _assess_bank_quality(
+    financials: list[FinancialStatement],
+) -> QualityAssessment:
+    """Bank-specific quality assessment. See slot mapping above."""
+    assessment = QualityAssessment()
+    sorted_fs = sorted(financials, key=lambda f: f.fiscal_year)
+
+    # Slot 0: ROE > 18% (higher bar for banks)
+    roe_factor = _assess_bank_roe(sorted_fs)
+    assessment.factors.append(roe_factor)
+    assessment.has_high_roe = roe_factor.passed
+
+    # Slot 1: Capital adequacy > 14.5%
+    car_factor = _assess_bank_capital_adequacy(sorted_fs)
+    assessment.factors.append(car_factor)
+    assessment.has_low_leverage = car_factor.passed  # semantics: "safe balance sheet"
+
+    # Slot 2: Earnings growth (unchanged)
+    eg_factor = _assess_earnings_growth(sorted_fs)
+    assessment.factors.append(eg_factor)
+    assessment.has_earnings_growth = eg_factor.passed
+
+    # Slot 3: Healthy asset quality (NPL < 15% and CoR < 2%)
+    aq_factor = _assess_bank_asset_quality(sorted_fs)
+    assessment.factors.append(aq_factor)
+    assessment.has_positive_fcf = aq_factor.passed  # semantics: "not bleeding"
+
+    # Slot 4: Dividend consistency (unchanged)
+    div_factor = _assess_dividends(sorted_fs)
+    assessment.factors.append(div_factor)
+    assessment.has_dividend_consistency = div_factor.passed
+
+    # Slot 5: n/a for banks — skip.
+    na_liquidity = QualityScore(
+        name="Current Ratio (n/a for banks)",
+        passed=True,
+        value=None,
+        threshold="not applicable to banks",
+        detail="Liquidity is regulated separately (LCR/NSFR)",
+        insufficient_data=True,
+    )
+    assessment.factors.append(na_liquidity)
+    assessment.has_adequate_liquidity = True
+
+    # Slot 6: Earning-asset growth (loans or deposits growing)
+    ea_factor = _assess_bank_earning_asset_growth(sorted_fs)
+    assessment.factors.append(ea_factor)
+    assessment.has_fcf_increasing = ea_factor.passed  # semantics: "growing engine"
+
+    # Slot 7: Net-interest-income growth (proxy for top-line consistency)
+    nii_factor = _assess_bank_nii_growth(sorted_fs)
+    assessment.factors.append(nii_factor)
+    assessment.has_revenue_consistency = nii_factor.passed
+
+    # Slot 8: n/a for banks — skip.
+    na_debt = QualityScore(
+        name="Liabilities/NI (n/a for banks)",
+        passed=True,
+        value=None,
+        threshold="not applicable to banks",
+        detail="Customer deposits are raw material, not debt",
+        insufficient_data=True,
+    )
+    assessment.factors.append(na_debt)
+    assessment.has_conservative_debt = True
+
+    # Slot 9: Operating efficiency (cost-to-income < 55%)
+    eff_factor = _assess_bank_operating_efficiency(sorted_fs)
+    assessment.factors.append(eff_factor)
+    assessment.has_capital_efficiency = eff_factor.passed
+
+    assessment.score = sum(1 for f in assessment.factors if f.passed)
+    return assessment
+
+
+def _assess_bank_roe(financials: list[FinancialStatement]) -> QualityScore:
+    """Banks should earn a premium ROE (> 18%)."""
+    roes = [_safe_float(fs.return_on_equity) for fs in financials]
+    roes = [r for r in roes if r is not None]
+    if not roes:
+        return QualityScore(
+            name="Bank ROE > 18%",
+            passed=False,
+            value=None,
+            threshold="> 0.18 average",
+            detail="No ROE data available",
+            insufficient_data=True,
+        )
+    avg = statistics.mean(roes)
+    years_above = sum(1 for r in roes if r > 0.18)
+    passed = avg > 0.18 and years_above / len(roes) >= 0.5
+    return QualityScore(
+        name="Bank ROE > 18%",
+        passed=passed,
+        value=round(avg, 4),
+        threshold="> 0.18 average, 50%+ years above",
+        detail=f"Avg ROE: {avg:.1%}, {years_above}/{len(roes)} years above 18%",
+    )
+
+
+def _assess_bank_capital_adequacy(
+    financials: list[FinancialStatement],
+) -> QualityScore:
+    """Capital adequacy ratio > 14.5% (well above CBK 14.5% minimum)."""
+    for fs in reversed(financials):
+        sm = fs.sector_metrics or {}
+        car = _safe_float(sm.get("capital_adequacy_ratio"))
+        if car is not None:
+            passed = car > 0.145
+            return QualityScore(
+                name="Capital Adequacy > 14.5%",
+                passed=passed,
+                value=round(car, 4),
+                threshold="> 0.145 (CBK minimum + buffer)",
+                detail=f"CAR: {car:.1%} (FY{fs.fiscal_year})",
+            )
+    return QualityScore(
+        name="Capital Adequacy > 14.5%",
+        passed=False,
+        value=None,
+        threshold="> 0.145",
+        detail="No capital adequacy ratio in sector_metrics",
+        insufficient_data=True,
+    )
+
+
+def _assess_bank_asset_quality(
+    financials: list[FinancialStatement],
+) -> QualityScore:
+    """NPL ratio < 15% AND cost of risk < 2% (latest year)."""
+    for fs in reversed(financials):
+        sm = fs.sector_metrics or {}
+        npl = _safe_float(sm.get("npl_ratio"))
+        cor = _safe_float(sm.get("cost_of_risk"))
+        if npl is None and cor is None:
+            continue
+        npl_ok = npl is None or npl < 0.15
+        cor_ok = cor is None or cor < 0.02
+        passed = npl_ok and cor_ok
+        parts = []
+        if npl is not None:
+            parts.append(f"NPL={npl:.1%}")
+        if cor is not None:
+            parts.append(f"CoR={cor:.2%}")
+        return QualityScore(
+            name="Healthy Asset Quality",
+            passed=passed,
+            value=round(npl, 4) if npl is not None else None,
+            threshold="NPL < 15%, CoR < 2%",
+            detail=f"{', '.join(parts)} (FY{fs.fiscal_year})",
+        )
+    return QualityScore(
+        name="Healthy Asset Quality",
+        passed=False,
+        value=None,
+        threshold="NPL < 15%, CoR < 2%",
+        detail="No NPL or cost-of-risk data in sector_metrics",
+        insufficient_data=True,
+    )
+
+
+def _assess_bank_earning_asset_growth(
+    financials: list[FinancialStatement],
+) -> QualityScore:
+    """Loans or deposits growing (positive trend over 3+ years)."""
+    for fs in reversed(financials):
+        sm = fs.sector_metrics or {}
+        loan_g = _safe_float(sm.get("loan_growth_pct"))
+        dep_g = _safe_float(sm.get("deposit_growth_pct"))
+        if loan_g is not None or dep_g is not None:
+            grow = max(g for g in [loan_g, dep_g] if g is not None)
+            passed = grow > 0.05
+            parts = []
+            if loan_g is not None:
+                parts.append(f"loans +{loan_g:.1%}")
+            if dep_g is not None:
+                parts.append(f"deposits +{dep_g:.1%}")
+            return QualityScore(
+                name="Earning-Asset Growth",
+                passed=passed,
+                value=round(grow, 4),
+                threshold="loans or deposits growing > 5%",
+                detail=", ".join(parts) + f" (FY{fs.fiscal_year})",
+            )
+    # Fallback: net-income growth as a rough proxy
+    return QualityScore(
+        name="Earning-Asset Growth",
+        passed=False,
+        value=None,
+        threshold="loans or deposits growing > 5%",
+        detail="No loan/deposit growth data in sector_metrics",
+        insufficient_data=True,
+    )
+
+
+def _assess_bank_nii_growth(
+    financials: list[FinancialStatement],
+) -> QualityScore:
+    """Net interest income growing in 60%+ of years (proxy for top-line)."""
+    series: list[tuple[int, float]] = []
+    for fs in financials:
+        sm = fs.sector_metrics or {}
+        nii = _safe_float(sm.get("net_interest_income"))
+        if nii is not None:
+            series.append((fs.fiscal_year, nii))
+    if len(series) < 2:
+        # Fall back to revenue if NII missing.
+        return _assess_revenue_consistency(financials)
+    growth_years = sum(
+        1 for i in range(1, len(series)) if series[i][1] > series[i - 1][1]
+    )
+    ratio = growth_years / (len(series) - 1)
+    return QualityScore(
+        name="Net Interest Income Growth",
+        passed=ratio >= 0.6,
+        value=round(ratio, 2),
+        threshold="NII grew in 60%+ of years",
+        detail=f"NII grew in {growth_years}/{len(series) - 1} years ({ratio:.0%})",
+    )
+
+
+def _assess_bank_operating_efficiency(
+    financials: list[FinancialStatement],
+) -> QualityScore:
+    """Cost-to-income ratio < 55% (well-run bank)."""
+    for fs in reversed(financials):
+        sm = fs.sector_metrics or {}
+        cti = _safe_float(sm.get("cost_to_income"))
+        if cti is not None:
+            passed = cti < 0.55
+            return QualityScore(
+                name="Cost-to-Income < 55%",
+                passed=passed,
+                value=round(cti, 4),
+                threshold="< 0.55",
+                detail=f"C/I: {cti:.1%} (FY{fs.fiscal_year})",
+            )
+    return QualityScore(
+        name="Cost-to-Income < 55%",
+        passed=False,
+        value=None,
+        threshold="< 0.55",
+        detail="No cost-to-income ratio in sector_metrics",
+        insufficient_data=True,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Recommendation Logic
 # ---------------------------------------------------------------------------
 
 def generate_recommendation(
     margin_of_safety: float | None,
     financials: list[FinancialStatement],
+    sector: str | None = None,
 ) -> Recommendation:
     """Generate a buy/sell/hold recommendation with quality-gated buy logic.
 
@@ -551,11 +852,13 @@ def generate_recommendation(
     Args:
         margin_of_safety: MOS as decimal (0.30 = 30%). None if not computable.
         financials: Financial statements for quality assessment.
+        sector: Optional company sector; when provided, sector-specific quality
+            factors are used (e.g. banks get NPL/CAR instead of D/E).
 
     Returns:
         Recommendation with action, reason, and quality breakdown.
     """
-    quality = assess_quality(financials)
+    quality = assess_quality(financials, sector=sector)
 
     if margin_of_safety is None:
         return Recommendation(
@@ -580,17 +883,12 @@ def generate_recommendation(
     has_low_de = quality.has_low_leverage
     has_dividends = quality.has_dividend_consistency
 
-    failing = []
-    if not quality.has_high_roe:
-        failing.append("ROE < 15%")
-    if not quality.has_earnings_growth:
-        failing.append("earnings not growing")
-    if not quality.has_conservative_debt:
-        failing.append("high debt/earnings ratio")
-    if not quality.factors[6].insufficient_data and not quality.has_fcf_increasing:
-        failing.append("FCF not consistently increasing")
-    if not quality.factors[9].insufficient_data and not quality.has_capital_efficiency:
-        failing.append("low capital efficiency")
+    # Build a human-readable list of failing core factors from the actual
+    # factor objects so bank-specific factor names propagate correctly.
+    failing = [
+        f.name for f in core_factors
+        if not f.insufficient_data and not f.passed
+    ]
 
     if margin_of_safety > 0.30:
         if all_core_pass and has_low_de and has_dividends:
@@ -698,7 +996,7 @@ def compute_recommendation(
         .all()
     )
 
-    return generate_recommendation(margin_of_safety, financials)
+    return generate_recommendation(margin_of_safety, financials, sector=company.sector)
 
 
 # ---------------------------------------------------------------------------

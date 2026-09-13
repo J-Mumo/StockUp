@@ -31,6 +31,15 @@ class IntrinsicValue(Base):
     recommendation: Mapped[str | None] = mapped_column(String(20), nullable=True)
     recommendation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Which valuation strategy produced this row (e.g. "industrial_dcf",
+    # "bank_residual_income"). NULL for legacy rows written before the
+    # sector dispatcher landed.
+    model_used: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+    # Decision-range values keyed by scenario name ("conservative", "base",
+    # "strong"). NULL for legacy rows.
+    scenario_values: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     # Calculation details (stored as JSON for full auditability)
     assumptions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     calculation_details: Mapped[dict | None] = mapped_column(JSON, nullable=True)

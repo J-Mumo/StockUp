@@ -2,7 +2,7 @@
 
 from datetime import datetime, date
 from sqlalchemy import (
-    String, DateTime, Date, Numeric, Integer, Text, ForeignKey, Index
+    JSON, String, DateTime, Date, Numeric, Integer, Text, ForeignKey, Index
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -42,6 +42,12 @@ class FinancialStatement(Base):
     return_on_equity: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
     debt_to_equity: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
     current_ratio: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
+
+    # Sector-specific line items (banks: NPL, CAR; insurers: combined ratio;
+    # REITs: FFO, occupancy; ...). Free-form JSON keeps schema stable while
+    # sector coverage evolves. Keys documented in
+    # plans/sector-specific-valuation.md.
+    sector_metrics: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # Metadata
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)

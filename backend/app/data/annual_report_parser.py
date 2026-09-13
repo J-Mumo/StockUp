@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.data.ai_enrichment import _validate_financial_record, _safe_num
 from app.data.pdf_downloader import download_annual_report, list_cached_reports
+from app.data.quality import check_extraction_is_annual
 from app.models.company import Company
 from app.models.financial_statement import FinancialStatement
 
@@ -47,8 +48,17 @@ RULES:
 - Capital expenditures as POSITIVE number
 - Free cash flow = Operating cash flow - Capital expenditures
 - If a figure is genuinely not present in the PDF, return null
-- Do NOT estimate or approximate — only report exact figures you can see
+- Do NOT estimate or approximate - only report exact figures you can see
 - Report the fiscal year as shown in the report header
+- ONLY extract from statements headed 'for the year ended' or 'as at 31 \
+  December' (or the equivalent full-year balance-sheet date). If this PDF \
+  is a half-year (H1) report, quarterly release, results announcement, \
+  presentation, integrated-report summary or otherwise NOT a full-year \
+  audited financial statement, set period_type to 'interim' and return \
+  null for all numeric fields.
+- Return period_type='annual' ONLY when the numbers cover a full 12-month \
+  audited period.
+- Return the balance-sheet date in report_date (ISO format YYYY-MM-DD).
 """
 
 EXTRACTION_USER_PROMPT = """\
@@ -80,6 +90,8 @@ Return ONLY a JSON object (no markdown, no explanation):
 {{
   "company": "{ticker}",
   "fiscal_year": {fiscal_year},
+  "period_type": "annual",
+  "report_date": "YYYY-MM-DD",
   "revenue": null,
   "net_income": null,
   "earnings_per_share": null,
@@ -577,6 +589,30 @@ def _upsert_pdf_financials(
             fiscal_year,
         )
         return "skipped"
+
+    # Annualness gate: refuse to persist interim / half-year / future-year
+    # rows even if the LLM returned numeric fields. Uses the nearest prior
+    # audited row as the YoY reference.
+    prev_row = (
+        db.query(FinancialStatement)
+        .filter(
+            FinancialStatement.company_id == company.id,
+            FinancialStatement.fiscal_year == int(fiscal_year) - 1,
+            FinancialStatement.period_type == "annual",
+        )
+        .first()
+    )
+    ok, reasons = check_extraction_is_annual(
+        record, prev_row=prev_row, company=company
+    )
+    if not ok:
+        logger.warning(
+            "Skipping %s FY%s upsert: extraction rejected as non-annual: %s",
+            company.ticker_symbol,
+            fiscal_year,
+            "; ".join(reasons),
+        )
+        return "skipped_non_annual"
 
     existing = (
         db.query(FinancialStatement)

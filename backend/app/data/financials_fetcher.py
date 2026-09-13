@@ -19,6 +19,7 @@ from typing import Optional
 import requests
 from sqlalchemy.orm import Session
 
+from app.data.quality import check_extraction_is_annual
 from app.models.company import Company
 from app.models.financial_statement import FinancialStatement
 
@@ -226,6 +227,32 @@ def upsert_financial(db: Session, company_id: int, data: dict) -> bool:
     """
     fiscal_year = data["fiscal_year"]
     period_type = data.get("period_type", "annual")
+
+    # Annualness gate: refuse rows that look like interim / future-year
+    # data even when the source labels them "annual". Uses the nearest
+    # prior audited row as YoY reference.
+    company = db.get(Company, company_id)
+    prev_row = (
+        db.query(FinancialStatement)
+        .filter(
+            FinancialStatement.company_id == company_id,
+            FinancialStatement.fiscal_year == int(fiscal_year) - 1,
+            FinancialStatement.period_type == "annual",
+        )
+        .first()
+    )
+    ok, reasons = check_extraction_is_annual(
+        data, prev_row=prev_row, company=company
+    )
+    if not ok:
+        ticker = company.ticker_symbol if company else f"company_id={company_id}"
+        logger.warning(
+            "Skipping %s FY%s upsert (kenyanstocks): non-annual: %s",
+            ticker,
+            fiscal_year,
+            "; ".join(reasons),
+        )
+        return False
 
     existing = (
         db.query(FinancialStatement)

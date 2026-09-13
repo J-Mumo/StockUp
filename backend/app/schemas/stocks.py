@@ -202,12 +202,18 @@ class ValuationResponse(BaseModel):
     recommendation: str | None = None
     recommendation_reason: str | None = None
 
+    # Sector-aware extensions (nullable for legacy rows)
+    model_used: str | None = None
+    scenario_values: dict[str, float] | None = None
+
     assumptions: dict[str, Any] | None = None
     calculation_details: dict[str, Any] | None = None
 
     calculated_at: datetime
 
-    model_config = {"from_attributes": True}
+    # ``model_used`` collides with Pydantic v2's protected ``model_*`` prefix
+    # namespace. Explicitly clear it so we can keep the more descriptive name.
+    model_config = {"from_attributes": True, "protected_namespaces": ()}
 
 
 class ValuationHistoryPoint(BaseModel):
