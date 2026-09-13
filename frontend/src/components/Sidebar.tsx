@@ -41,10 +41,11 @@ export default function Sidebar() {
     <>
       {/* Mobile menu button */}
       <button
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-md bg-dark-surface text-white"
+        className="lg:hidden fixed top-3 left-3 z-50 h-11 w-11 flex items-center justify-center rounded-md bg-dark-surface border border-dark-border text-white shadow-lg active:scale-95 transition-transform"
         onClick={() => setMobileOpen(!mobileOpen)}
+        aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
       >
-        {mobileOpen ? <X size={20} /> : <Menu size={20} />}
+        {mobileOpen ? <X size={22} /> : <Menu size={22} />}
       </button>
 
       {/* Overlay */}
@@ -57,15 +58,15 @@ export default function Sidebar() {
 
       {/* Sidebar */}
       <aside
-        className={`fixed top-0 left-0 h-full w-64 bg-dark-surface border-r border-dark-border z-40 transform transition-transform duration-200 ease-in-out
+        className={`fixed top-0 left-0 h-full w-64 bg-dark-surface border-r border-dark-border z-40 transform transition-transform duration-200 ease-in-out flex flex-col
           ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}
       >
-        <div className="flex items-center gap-2 px-6 py-5 border-b border-dark-border">
+        <div className="flex items-center gap-2 px-6 py-5 border-b border-dark-border shrink-0">
           <TrendingUp className="text-primary-400" size={24} />
           <h1 className="text-xl font-bold text-white">StockUp</h1>
         </div>
 
-        <nav className="mt-6 px-3 flex-1">
+        <nav className="mt-6 px-3 flex-1 overflow-y-auto">
           {navItems.map((item) => (
             <NavLink
               key={item.to}
@@ -85,7 +86,7 @@ export default function Sidebar() {
           ))}
         </nav>
 
-        <div className="absolute bottom-0 left-0 right-0 p-3 border-t border-dark-border space-y-1">
+        <div className="p-3 border-t border-dark-border space-y-1 shrink-0 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <button
             onClick={toggleLearn}
             className={`flex items-center gap-3 px-3 py-2.5 rounded-lg w-full transition-colors ${

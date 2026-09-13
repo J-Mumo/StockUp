@@ -43,7 +43,7 @@ export default function LoginPage() {
           <p className="text-gray-400">Stock valuation & portfolio tracker</p>
         </div>
 
-        <div className="bg-dark-surface border border-dark-border rounded-xl p-8">
+        <div className="bg-dark-surface border border-dark-border rounded-xl p-6 sm:p-8">
           <h2 className="text-xl font-semibold text-white mb-6">Sign In</h2>
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -53,6 +53,8 @@ export default function LoginPage() {
               </label>
               <input
                 type="email"
+                autoComplete="email"
+                inputMode="email"
                 {...register('email', { required: 'Email is required' })}
                 className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 placeholder="you@example.com"
@@ -68,6 +70,7 @@ export default function LoginPage() {
               </label>
               <input
                 type="password"
+                autoComplete="current-password"
                 {...register('password', { required: 'Password is required' })}
                 className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 placeholder="••••••••"

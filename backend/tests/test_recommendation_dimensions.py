@@ -256,3 +256,116 @@ class TestComputeDimensions:
         # (83*0.4 + 80*0.3 + 100*0.2) / 0.9 = (33.2 + 24 + 20) / 0.9 = 85.78 → 86
         assert dims.composite_score == 86
         assert dims.composite_verdict == "Strong Buy"
+
+
+# ---------------------------------------------------------------------------
+# Two-stage summary: business_score / valuation_score
+# ---------------------------------------------------------------------------
+
+class TestTwoStageSummary:
+    """Separating "how good is the business" from "how attractive is the price"
+    is a Buffett-style framing. business_score = Quality + Trend only (no
+    price, no position). valuation_score mirrors the Valuation dimension."""
+
+    def test_business_score_weighted_combo(self):
+        today = date(2026, 9, 13)
+        prices = [
+            _price(day_offset=250 - i, close=100 + i, today=today)
+            for i in range(250)
+        ]  # trend → 100
+        fins = [
+            _fs(2022, net_income=100), _fs(2023, net_income=120),
+            _fs(2024, net_income=140), _fs(2025, net_income=160),
+        ]
+        dims = compute_dimensions(
+            mos=-0.50,  # deep discount to intrinsic → valuation dim near 0
+            quality_score=8, quality_max_score=10,   # quality = 80
+            quality_subscores=[],
+            prices=prices, financials=fins,
+            position=None,
+            today=today,
+        )
+        # quality=80, trend=100 → business = 0.60*80 + 0.40*100 = 88
+        assert dims.business_score == 88
+        # valuation_score mirrors the Valuation dimension score
+        assert dims.valuation_score == dims.valuation.score
+        assert dims.valuation_score == 0  # deeply overvalued
+
+    def test_business_excludes_valuation_and_position(self):
+        """Even at a terrible price, a high-quality growing business scores
+        highly on business_score. That's the whole point."""
+        today = date(2026, 9, 13)
+        prices = [
+            _price(day_offset=250 - i, close=100 + i, today=today)
+            for i in range(250)
+        ]
+        fins = [
+            _fs(2022, net_income=100), _fs(2023, net_income=120),
+            _fs(2024, net_income=140), _fs(2025, net_income=160),
+        ]
+        ctx = PortfolioContext(
+            net_qty=1000, avg_cost=200.0, current_price=50.0,  # -75% loss
+            portfolio_value=1_000_000, sector_value=500_000,   # overexposed
+        )
+        dims = compute_dimensions(
+            mos=-0.60, quality_score=9, quality_max_score=10,
+            quality_subscores=[],
+            prices=prices, financials=fins, position=ctx,
+            today=today,
+        )
+        # business = 0.60*90 + 0.40*100 = 94 — untouched by valuation/position
+        assert dims.business_score == 94
+        assert dims.valuation_score == 0
+
+    def test_business_none_when_quality_and_trend_missing(self):
+        dims = compute_dimensions(
+            mos=0.10,
+            quality_score=0, quality_max_score=0,  # inapplicable
+            quality_subscores=[],
+            prices=[], financials=[],              # trend inapplicable
+            position=None,
+        )
+        assert dims.business_score is None
+
+    def test_business_uses_available_dimension_only(self):
+        """If only Quality is applicable, business_score = quality.score."""
+        dims = compute_dimensions(
+            mos=0.10,
+            quality_score=7, quality_max_score=10,  # quality = 70
+            quality_subscores=[],
+            prices=[], financials=[],               # trend inapplicable
+            position=None,
+        )
+        assert dims.quality.score == 70
+        assert dims.trend.applicable is False
+        assert dims.business_score == 70
+
+    def test_valuation_score_none_when_mos_missing(self):
+        dims = compute_dimensions(
+            mos=None,
+            quality_score=5, quality_max_score=10,
+            quality_subscores=[],
+            prices=[], financials=[
+                _fs(2022, net_income=100), _fs(2023, net_income=110),
+                _fs(2024, net_income=120), _fs(2025, net_income=130),
+            ],
+            position=None,
+        )
+        assert dims.valuation_score is None
+
+    def test_to_dict_includes_new_fields(self):
+        dims = compute_dimensions(
+            mos=0.10,
+            quality_score=8, quality_max_score=10,
+            quality_subscores=[],
+            prices=[], financials=[
+                _fs(2022, net_income=100), _fs(2023, net_income=110),
+                _fs(2024, net_income=120), _fs(2025, net_income=130),
+            ],
+            position=None,
+        )
+        payload = dims.to_dict()
+        assert "business_score" in payload
+        assert "valuation_score" in payload
+        assert payload["business_score"] == dims.business_score
+        assert payload["valuation_score"] == dims.valuation_score

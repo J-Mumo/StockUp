@@ -83,6 +83,13 @@ class Dimensions:
     position: DimensionScore
     composite_score: int | None
     composite_verdict: str | None
+    # Two-stage summary (Buffett-style separation):
+    #   business_score   — "How good is the company?" (Quality + Trend)
+    #   valuation_score  — "How attractive is the stock at today's price?"
+    # Kept as a top-level mirror of the Valuation dimension so the UI can
+    # render a symmetric Business/Valuation header without re-computing.
+    business_score: int | None = None
+    valuation_score: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -92,6 +99,8 @@ class Dimensions:
             "position": self.position.to_dict(),
             "composite_score": self.composite_score,
             "composite_verdict": self.composite_verdict,
+            "business_score": self.business_score,
+            "valuation_score": self.valuation_score,
         }
 
 
@@ -105,6 +114,15 @@ _DEFAULT_WEIGHTS = {
     "quality":   0.30,
     "trend":     0.20,
     "position":  0.10,
+}
+
+# Two-stage summary weights: the "Business" aggregate mixes company-intrinsic
+# signals only. Position is user-specific and Valuation is price-specific,
+# so both are excluded here. Quality is weighted heavier than Trend because
+# it reflects durable business economics rather than recent momentum.
+_BUSINESS_WEIGHTS = {
+    "quality": 0.60,
+    "trend":   0.40,
 }
 
 # Valuation curve: MOS below _VAL_FLOOR → 0, above _VAL_CAP → 100.
@@ -409,6 +427,31 @@ def _composite_verdict(score: int, position_applicable: bool) -> str:
     return "Sell" if position_applicable else "Avoid"
 
 
+def _business_score(
+    quality: DimensionScore,
+    trend: DimensionScore,
+    weights: dict[str, float] | None = None,
+) -> int | None:
+    """Aggregate the company-intrinsic dimensions into a single 0-100 score.
+
+    Returns ``None`` if neither Quality nor Trend is applicable — this
+    signals to the UI that we can't say anything about business quality.
+    """
+    weights = weights or _BUSINESS_WEIGHTS
+    parts: list[tuple[float, int]] = []
+    if quality.applicable and quality.score is not None:
+        parts.append((weights["quality"], quality.score))
+    if trend.applicable and trend.score is not None:
+        parts.append((weights["trend"], trend.score))
+    if not parts:
+        return None
+    total_weight = sum(w for w, _ in parts)
+    if total_weight <= 0:
+        return None
+    weighted = sum(w * s for w, s in parts) / total_weight
+    return int(round(weighted))
+
+
 # ---------------------------------------------------------------------------
 # Top-level entry point
 # ---------------------------------------------------------------------------
@@ -439,6 +482,8 @@ def compute_dimensions(
         position=pos,
         composite_score=composite,
         composite_verdict=verdict,
+        business_score=_business_score(qual, trnd),
+        valuation_score=val.score if val.applicable else None,
     )
 
 

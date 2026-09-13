@@ -46,6 +46,10 @@ DEFAULT_ASSUMPTIONS: dict[str, Any] = {
     "min_years_for_dcf": 3,
     "min_years_for_epv": 2,
     "outlier_std_multiplier": 2.0,
+    # Bear/base/bull scenarios shift the FCF growth rate by this many
+    # percentage points either side of ``growth_rate_used`` (still capped
+    # by max_growth_rate_cap / min_growth_rate_floor).
+    "scenario_growth_delta": 0.04,
 }
 
 
@@ -116,6 +120,13 @@ def calculate_dcf(
     discount_rate = params["discount_rate"]
     terminal_growth = params["terminal_growth_rate"]
     n_years = params["projection_years"]
+
+    # Record assumptions actually applied so the UI can render them without
+    # having to reverse-engineer from ``assumptions_used``.
+    result.base_fcf = base_fcf
+    result.discount_rate = discount_rate
+    result.terminal_growth_rate = terminal_growth
+    result.projection_years = n_years
 
     projected_fcfs: list[float] = []
     pv_fcfs = 0.0
@@ -288,6 +299,55 @@ class IndustrialValuator(SectorValuator):
         )
         mos = calculate_margin_of_safety(weighted_iv, market_price)
 
+        # --- Bear / base / bull scenarios -----------------------------------
+        # Only meaningful when the base DCF succeeded; otherwise we surface
+        # nothing and let the frontend show a fallback.
+        scenario_values: dict[str, float] = {}
+        notes: list[str] = []
+        if (
+            dcf.intrinsic_value_per_share is not None
+            and dcf.growth_rate_used is not None
+            and dcf.base_fcf is not None
+            and dcf.discount_rate is not None
+            and dcf.terminal_growth_rate is not None
+            and dcf.projection_years
+            and shares > 0
+        ):
+            delta = float(params["scenario_growth_delta"])
+            floor = float(params["min_growth_rate_floor"])
+            cap = float(params["max_growth_rate_cap"])
+            base_g = float(dcf.growth_rate_used)
+            bear_g = max(floor, base_g - delta)
+            bull_g = min(cap, base_g + delta)
+
+            bear_iv = _dcf_value_for_growth(
+                base_fcf=dcf.base_fcf,
+                growth_rate=bear_g,
+                discount_rate=dcf.discount_rate,
+                terminal_growth=dcf.terminal_growth_rate,
+                n_years=dcf.projection_years,
+                shares=shares,
+            )
+            bull_iv = _dcf_value_for_growth(
+                base_fcf=dcf.base_fcf,
+                growth_rate=bull_g,
+                discount_rate=dcf.discount_rate,
+                terminal_growth=dcf.terminal_growth_rate,
+                n_years=dcf.projection_years,
+                shares=shares,
+            )
+            if bear_iv is not None and bull_iv is not None:
+                scenario_values = {
+                    "bear": round(bear_iv, 4),
+                    "base": round(float(dcf.intrinsic_value_per_share), 4),
+                    "bull": round(bull_iv, 4),
+                }
+                notes.append(
+                    f"scenarios: bear g={bear_g:.2%}, base g={base_g:.2%}, "
+                    f"bull g={bull_g:.2%} (discount={dcf.discount_rate:.2%}, "
+                    f"terminal={dcf.terminal_growth_rate:.2%})"
+                )
+
         return ValuationResult(
             dcf=dcf,
             epv=epv,
@@ -298,7 +358,40 @@ class IndustrialValuator(SectorValuator):
             assumptions_used=params,
             weights_applied=weights,
             model_used=self.model_name,
+            scenario_values=scenario_values,
+            notes=notes,
         )
+
+
+def _dcf_value_for_growth(
+    *,
+    base_fcf: float,
+    growth_rate: float,
+    discount_rate: float,
+    terminal_growth: float,
+    n_years: int,
+    shares: int,
+) -> float | None:
+    """Run a Gordon-growth DCF with a caller-supplied growth rate.
+
+    Returns intrinsic value per share, or ``None`` if the inputs make the
+    calculation ill-defined (e.g. discount ≤ terminal growth).
+    """
+    if shares <= 0 or n_years <= 0:
+        return None
+    if discount_rate <= terminal_growth:
+        return None
+
+    pv_fcfs = 0.0
+    final_fcf = base_fcf
+    for t in range(1, n_years + 1):
+        projected = base_fcf * ((1 + growth_rate) ** t)
+        pv_fcfs += projected / ((1 + discount_rate) ** t)
+        final_fcf = projected
+
+    terminal_value = (final_fcf * (1 + terminal_growth)) / (discount_rate - terminal_growth)
+    pv_terminal = terminal_value / ((1 + discount_rate) ** n_years)
+    return (pv_fcfs + pv_terminal) / shares
 
 
 # ---------------------------------------------------------------------------

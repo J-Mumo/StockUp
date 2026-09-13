@@ -185,7 +185,7 @@ export default function WatchlistsPage() {
               <table className="w-full">
                 <thead>
                   <tr className="text-left text-sm text-gray-400 border-b border-dark-border">
-                    <th className="pb-3 font-medium">Company</th>
+                    <th className="pb-3 pr-4 font-medium sticky-col">Company</th>
                     <th className="pb-3 font-medium">Symbol</th>
                     <th className="pb-3 font-medium">Notes</th>
                     <th className="pb-3 font-medium">Added</th>
@@ -195,7 +195,7 @@ export default function WatchlistsPage() {
                 <tbody>
                   {selectedWatchlist.items.map((item) => (
                     <tr key={item.id} className="border-b border-dark-border/50">
-                      <td className="py-3">
+                      <td className="py-3 pr-4 sticky-col">
                         <Link
                           to={`/companies/${item.company_id}`}
                           className="text-white hover:text-primary-400 font-medium"

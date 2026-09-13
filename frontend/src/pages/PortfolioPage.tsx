@@ -326,7 +326,7 @@ export default function PortfolioPage() {
                   <table className="w-full">
                     <thead>
                       <tr className="text-left text-sm text-gray-400 border-b border-dark-border">
-                        <th className="pb-3 font-medium">Company</th>
+                        <th className="pb-3 pr-4 font-medium sticky-col">Company</th>
                         <th className="pb-3 font-medium text-right">Shares</th>
                         <th className="pb-3 font-medium text-right">Avg Cost</th>
                         <th className="pb-3 font-medium text-right">Current</th>
@@ -339,7 +339,7 @@ export default function PortfolioPage() {
                     <tbody>
                       {holdings.map((h) => (
                         <tr key={h.company_id} className="border-b border-dark-border/50">
-                          <td className="py-3">
+                          <td className="py-3 pr-4 sticky-col">
                             <Link to={`/companies/${h.company_id}`} className="hover:text-primary-400 transition-colors">
                               <p className="text-white font-medium">{h.company_name}</p>
                               <p className="text-xs text-gray-500">{h.company_ticker}</p>
@@ -403,7 +403,7 @@ export default function PortfolioPage() {
                 <table className="w-full">
                   <thead>
                     <tr className="text-left text-sm text-gray-400 border-b border-dark-border">
-                      <th className="pb-3 font-medium">Company</th>
+                      <th className="pb-3 pr-4 font-medium sticky-col">Company</th>
                       <th className="pb-3 font-medium text-right">Shares Sold</th>
                       <th className="pb-3 font-medium text-right">Avg Buy</th>
                       <th className="pb-3 font-medium text-right">Avg Sell</th>
@@ -418,7 +418,7 @@ export default function PortfolioPage() {
                   <tbody>
                     {realized.positions.map((r: RealizedPosition) => (
                       <tr key={r.company_id} className="border-b border-dark-border/50">
-                        <td className="py-3">
+                        <td className="py-3 pr-4 sticky-col">
                           <Link to={`/companies/${r.company_id}`} className="hover:text-primary-400 transition-colors">
                             <p className="text-white font-medium">{r.company_name}</p>
                             <p className="text-xs text-gray-500">
@@ -468,7 +468,7 @@ export default function PortfolioPage() {
                 <table className="w-full">
                   <thead>
                     <tr className="text-left text-sm text-gray-400 border-b border-dark-border">
-                      <th className="pb-3 font-medium">Date</th>
+                      <th className="pb-3 pr-4 font-medium sticky-col">Date</th>
                       <th className="pb-3 font-medium">Type</th>
                       <th className="pb-3 font-medium">Company</th>
                       <th className="pb-3 font-medium text-right">Shares</th>
@@ -485,7 +485,7 @@ export default function PortfolioPage() {
                       const net = t.transaction_type === 'buy' ? t.total_amount + fees : t.total_amount - fees;
                       return (
                         <tr key={t.id} className="border-b border-dark-border/50 group">
-                          <td className="py-3 text-gray-300">{t.transaction_date}</td>
+                          <td className="py-3 pr-4 text-gray-300 sticky-col">{t.transaction_date}</td>
                           <td className="py-3">
                             <span className={`flex items-center gap-1 ${t.transaction_type === 'buy' ? 'text-gain' : 'text-loss'}`}>
                               {t.transaction_type === 'buy' ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
@@ -503,17 +503,17 @@ export default function PortfolioPage() {
                           <td className="py-3 text-right text-gray-400">{fees > 0 ? formatCurrency(fees) : '—'}</td>
                           <td className="py-3 text-right text-white font-medium">{formatCurrency(net)}</td>
                           <td className="py-3 text-right">
-                            <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                               <button
                                 onClick={() => openEditTransaction(t)}
-                                className="p-1.5 text-gray-400 hover:text-primary-400 hover:bg-dark-border/50 rounded-md transition-colors"
+                                className="p-2 text-gray-400 hover:text-primary-400 hover:bg-dark-border/50 rounded-md transition-colors"
                                 title="Edit transaction"
                               >
                                 <Pencil size={14} />
                               </button>
                               <button
                                 onClick={() => deleteTransaction(t.id)}
-                                className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-dark-border/50 rounded-md transition-colors"
+                                className="p-2 text-gray-400 hover:text-red-400 hover:bg-dark-border/50 rounded-md transition-colors"
                                 title="Delete transaction"
                               >
                                 <Trash2 size={14} />

@@ -121,6 +121,47 @@ function DimensionRow({ dim }: { dim: DimensionScore }) {
   );
 }
 
+/** Business vs Valuation two-stage tile row. */
+function TwoStageSummary({
+  businessScore,
+  valuationScore,
+}: {
+  businessScore: number | null;
+  valuationScore: number | null;
+}) {
+  const tile = (
+    label: string,
+    score: number | null,
+    subtitle: string,
+  ) => {
+    const bar = scoreColor(score);
+    const applicable = score !== null;
+    return (
+      <div className="flex-1 p-3 rounded-lg border border-dark-border bg-dark-surface/40">
+        <div className="flex items-baseline justify-between mb-1">
+          <span className="text-xs uppercase tracking-wide text-gray-400">{label}</span>
+          <span className={`text-lg font-bold ${applicable ? 'text-white' : 'text-gray-500'}`}>
+            {applicable ? score : 'n/a'}
+          </span>
+        </div>
+        <div className="w-full h-1.5 bg-dark-bg rounded-full overflow-hidden mb-1">
+          <div
+            className={`h-full ${bar} transition-all`}
+            style={{ width: applicable ? `${score}%` : '0%' }}
+          />
+        </div>
+        <p className="text-[10px] text-gray-500 leading-tight">{subtitle}</p>
+      </div>
+    );
+  };
+  return (
+    <div className="mb-3 flex gap-2">
+      {tile('Business', businessScore, 'How good is the company? (Quality + Trend)')}
+      {tile('Valuation', valuationScore, 'How attractive at today\u2019s price?')}
+    </div>
+  );
+}
+
 export default function RecommendationScorecard({ dimensions }: Props) {
   const composite = dimensions.composite_score;
   const verdict = dimensions.composite_verdict;
@@ -154,6 +195,16 @@ export default function RecommendationScorecard({ dimensions }: Props) {
           </div>
         )}
       </div>
+
+      {/* Two-stage Business vs Valuation summary — separates "how good is
+          the business" from "how attractive is the price". */}
+      {(dimensions.business_score !== null || dimensions.valuation_score !== null) && (
+        <TwoStageSummary
+          businessScore={dimensions.business_score}
+          valuationScore={dimensions.valuation_score}
+        />
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
         <DimensionRow dim={dimensions.valuation} />
         <DimensionRow dim={dimensions.quality} />

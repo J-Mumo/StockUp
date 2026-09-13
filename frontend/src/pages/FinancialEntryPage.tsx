@@ -173,7 +173,7 @@ export default function FinancialEntryPage() {
         </h1>
       </div>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="bg-dark-surface border border-dark-border rounded-xl p-6">
+      <form onSubmit={handleSubmit(onSubmit)} className="bg-dark-surface border border-dark-border rounded-xl p-4 sm:p-6">
         {/* Type & Period */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <div>
@@ -237,17 +237,17 @@ export default function FinancialEntryPage() {
         </div>
 
         {/* Submit */}
-        <div className="mt-6 flex gap-3 justify-end">
+        <div className="mt-6 flex flex-col-reverse sm:flex-row gap-3 sm:justify-end">
           <Link
             to={`/companies/${companyId}`}
-            className="px-4 py-2.5 border border-dark-border text-gray-300 rounded-lg hover:bg-dark-border/50 transition-colors"
+            className="w-full sm:w-auto text-center px-4 py-2.5 border border-dark-border text-gray-300 rounded-lg hover:bg-dark-border/50 transition-colors"
           >
             Cancel
           </Link>
           <button
             type="submit"
             disabled={submitting}
-            className="px-6 py-2.5 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors"
+            className="w-full sm:w-auto px-6 py-2.5 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors"
           >
             {submitting ? 'Saving...' : isEdit ? 'Update' : 'Create'}
           </button>

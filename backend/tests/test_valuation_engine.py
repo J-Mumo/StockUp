@@ -516,3 +516,117 @@ class TestComputeValuation:
 
         result = compute_valuation(db, c.id)
         assert result == "no_shares_outstanding"
+
+
+# ---------------------------------------------------------------------------
+# Test: DCFResult assumption fields (base_fcf, discount, terminal, projection)
+# ---------------------------------------------------------------------------
+
+class TestDCFAssumptionFields:
+    """The DCF result must expose the assumptions actually applied so the UI
+    can render them without cross-referencing ``assumptions_used``."""
+
+    def test_dcf_records_applied_assumptions(self):
+        financials = [
+            _make_fs(2021, free_cash_flow=1_000_000_000),
+            _make_fs(2022, free_cash_flow=1_100_000_000),
+            _make_fs(2023, free_cash_flow=1_200_000_000),
+            _make_fs(2024, free_cash_flow=1_300_000_000),
+            _make_fs(2025, free_cash_flow=1_400_000_000),
+        ]
+        result = calculate_dcf(financials, 100_000_000)
+        assert result.error is None
+        assert result.base_fcf == pytest.approx(1_400_000_000)
+        assert result.discount_rate == pytest.approx(DEFAULT_ASSUMPTIONS["discount_rate"])
+        assert result.terminal_growth_rate == pytest.approx(DEFAULT_ASSUMPTIONS["terminal_growth_rate"])
+        assert result.projection_years == DEFAULT_ASSUMPTIONS["projection_years"]
+
+    def test_dcf_respects_custom_assumptions_in_result(self):
+        financials = [_make_fs(y, free_cash_flow=5e9) for y in range(2020, 2026)]
+        custom = {"discount_rate": 0.15, "terminal_growth_rate": 0.02, "projection_years": 7}
+        result = calculate_dcf(financials, 1_000_000_000, assumptions=custom)
+        assert result.error is None
+        assert result.discount_rate == pytest.approx(0.15)
+        assert result.terminal_growth_rate == pytest.approx(0.02)
+        assert result.projection_years == 7
+
+
+# ---------------------------------------------------------------------------
+# Test: IndustrialValuator bear/base/bull scenarios
+# ---------------------------------------------------------------------------
+
+class TestIndustrialScenarios:
+    def _company(self, shares: int = 100_000_000) -> Company:
+        c = MagicMock(spec=Company)
+        c.id = 1
+        c.shares_outstanding = shares
+        c.sector = "Manufacturing"
+        return c
+
+    def test_scenarios_populated_and_ordered(self):
+        """Bear < Base < Bull when growth is inside the cap/floor band."""
+        from app.services.valuation.industrial import IndustrialValuator
+
+        financials = [
+            _make_fs(2021, free_cash_flow=1_000_000_000, net_income=1e9, revenue=5e9),
+            _make_fs(2022, free_cash_flow=1_100_000_000, net_income=1e9, revenue=5e9),
+            _make_fs(2023, free_cash_flow=1_200_000_000, net_income=1e9, revenue=5e9),
+            _make_fs(2024, free_cash_flow=1_300_000_000, net_income=1e9, revenue=5e9),
+            _make_fs(2025, free_cash_flow=1_400_000_000, net_income=1e9, revenue=5e9,
+                     total_equity=8e9),
+        ]
+        result = IndustrialValuator().value(
+            company=self._company(),
+            financials=financials,
+            market_price=50.0,
+        )
+
+        assert result.dcf.error is None
+        sv = result.scenario_values
+        assert set(sv.keys()) == {"bear", "base", "bull"}
+        assert sv["bear"] < sv["base"] < sv["bull"], sv
+        # Base scenario must match the DCF/share to 4dp.
+        assert sv["base"] == pytest.approx(result.dcf.intrinsic_value_per_share, abs=1e-3)
+
+    def test_scenarios_absent_when_dcf_fails(self):
+        """No scenario_values when DCF can't be computed."""
+        from app.services.valuation.industrial import IndustrialValuator
+
+        financials = [
+            _make_fs(2024, free_cash_flow=1e9, net_income=1e9, revenue=5e9),
+            _make_fs(2025, free_cash_flow=1e9, net_income=1e9, revenue=5e9,
+                     total_equity=8e9),
+        ]  # only 2 years → insufficient for DCF
+        result = IndustrialValuator().value(
+            company=self._company(),
+            financials=financials,
+            market_price=50.0,
+        )
+        assert result.dcf.error is not None
+        assert result.scenario_values == {}
+
+    def test_scenario_delta_respected(self):
+        """A larger scenario_growth_delta widens the bear/bull spread."""
+        from app.services.valuation.industrial import IndustrialValuator
+
+        financials = [
+            _make_fs(2021, free_cash_flow=1_000_000_000, net_income=1e9, revenue=5e9),
+            _make_fs(2022, free_cash_flow=1_050_000_000, net_income=1e9, revenue=5e9),
+            _make_fs(2023, free_cash_flow=1_100_000_000, net_income=1e9, revenue=5e9),
+            _make_fs(2024, free_cash_flow=1_150_000_000, net_income=1e9, revenue=5e9),
+            _make_fs(2025, free_cash_flow=1_200_000_000, net_income=1e9, revenue=5e9,
+                     total_equity=8e9),
+        ]
+        narrow = IndustrialValuator().value(
+            company=self._company(), financials=financials, market_price=50.0,
+            assumptions={"scenario_growth_delta": 0.02},
+        )
+        wide = IndustrialValuator().value(
+            company=self._company(), financials=financials, market_price=50.0,
+            assumptions={"scenario_growth_delta": 0.06},
+        )
+        assert wide.scenario_values["bull"] > narrow.scenario_values["bull"]
+        assert wide.scenario_values["bear"] < narrow.scenario_values["bear"]
+
+
+

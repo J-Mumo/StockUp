@@ -42,7 +42,7 @@ export default function RegisterPage() {
           <p className="text-gray-400">Create your account</p>
         </div>
 
-        <div className="bg-dark-surface border border-dark-border rounded-xl p-8">
+        <div className="bg-dark-surface border border-dark-border rounded-xl p-6 sm:p-8">
           <h2 className="text-xl font-semibold text-white mb-6">Register</h2>
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -52,6 +52,7 @@ export default function RegisterPage() {
               </label>
               <input
                 type="text"
+                autoComplete="name"
                 {...register('full_name', { required: 'Name is required' })}
                 className="w-full px-4 py-2.5 bg-dark-bg border border-dark-border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 placeholder="John Doe"
@@ -67,6 +68,8 @@ export default function RegisterPage() {
               </label>
               <input
                 type="email"
+                autoComplete="email"
+                inputMode="email"
                 {...register('email', {
                   required: 'Email is required',
                   pattern: { value: /^\S+@\S+$/i, message: 'Invalid email' },
@@ -85,6 +88,7 @@ export default function RegisterPage() {
               </label>
               <input
                 type="password"
+                autoComplete="new-password"
                 {...register('password', {
                   required: 'Password is required',
                   minLength: { value: 6, message: 'At least 6 characters' },
@@ -103,6 +107,7 @@ export default function RegisterPage() {
               </label>
               <input
                 type="password"
+                autoComplete="new-password"
                 {...register('confirmPassword', {
                   required: 'Please confirm password',
                   validate: (val) => val === watch('password') || 'Passwords do not match',

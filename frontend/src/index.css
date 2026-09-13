@@ -21,9 +21,23 @@
 @layer base {
   html {
     color-scheme: dark;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
   }
   body {
     @apply bg-dark-bg text-gray-100;
+    overscroll-behavior-y: contain;
+  }
+
+  /* Prevent iOS from zooming the viewport when focusing form controls.
+     iOS Safari auto-zooms when input font-size < 16px. We keep the visual
+     size compact on desktop but bump to 16px on small screens. */
+  @media (max-width: 640px) {
+    input,
+    select,
+    textarea {
+      font-size: 16px;
+    }
   }
 }
 
@@ -36,4 +50,21 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 input[type="date"] {
   position: relative;
+}
+
+/* Utility: sticky first column for horizontally-scrolled tables on mobile.
+   Apply `sticky-col` to the first <th> and first <td> in each row.
+   Only active below the `sm` breakpoint so desktop tables behave normally. */
+@media (max-width: 639px) {
+  .sticky-col {
+    position: sticky;
+    left: 0;
+    z-index: 5;
+    background-color: var(--color-dark-surface);
+    box-shadow: 4px 0 6px -4px rgba(0, 0, 0, 0.5);
+  }
+  thead .sticky-col {
+    background-color: var(--color-dark-surface);
+    z-index: 6;
+  }
 }

@@ -122,7 +122,7 @@ export default function DashboardPage() {
             <table className="w-full">
               <thead>
                 <tr className="text-left text-sm text-gray-400 border-b border-dark-border">
-                  <th className="pb-3 font-medium">Company</th>
+                  <th className="pb-3 pr-4 font-medium sticky-col">Company</th>
                   <th className="pb-3 font-medium">Symbol</th>
                   <th className="pb-3 font-medium text-right">Market Price</th>
                   <th className="pb-3 font-medium text-right">
@@ -137,7 +137,7 @@ export default function DashboardPage() {
               <tbody>
                 {data.top_undervalued.map((stock) => (
                   <tr key={stock.company_id} className="border-b border-dark-border/50 hover:bg-dark-border/20">
-                    <td className="py-3">
+                    <td className="py-3 pr-4 sticky-col">
                       <Link to={`/companies/${stock.company_id}`} className="text-white hover:text-primary-400">
                         {stock.company_name}
                       </Link>

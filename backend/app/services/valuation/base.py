@@ -27,6 +27,13 @@ class DCFResult:
     terminal_value: float | None = None
     growth_rate_used: float | None = None
     historical_fcfs: list[float] = field(default_factory=list)
+    # Assumptions actually applied to this DCF run — surfaced so the UI can
+    # explain *how* the intrinsic value was produced without users having to
+    # cross-reference ``assumptions_used``.
+    base_fcf: float | None = None
+    discount_rate: float | None = None
+    terminal_growth_rate: float | None = None
+    projection_years: int | None = None
     error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -38,6 +45,10 @@ class DCFResult:
             "terminal_value": self.terminal_value,
             "growth_rate_used": self.growth_rate_used,
             "historical_fcfs": self.historical_fcfs,
+            "base_fcf": self.base_fcf,
+            "discount_rate": self.discount_rate,
+            "terminal_growth_rate": self.terminal_growth_rate,
+            "projection_years": self.projection_years,
             "error": self.error,
         }
 

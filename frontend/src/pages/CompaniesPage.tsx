@@ -51,7 +51,7 @@ function CompanySection({ title, companies, badge }: CompanySectionProps) {
           <table className="w-full">
             <thead>
               <tr className="text-left text-xs text-gray-400 border-b border-dark-border bg-dark-bg/50">
-                <th className="px-4 py-3 font-medium">Company</th>
+                <th className="px-4 py-3 font-medium sticky-col">Company</th>
                 <th className="px-4 py-3 font-medium">Ticker</th>
                 <th className="px-4 py-3 font-medium">Sector</th>
                 <th className="px-4 py-3 font-medium text-right">Market Price</th>
@@ -72,7 +72,7 @@ function CompanySection({ title, companies, badge }: CompanySectionProps) {
 
                 return (
                   <tr key={company.id} className="border-b border-dark-border/50 hover:bg-dark-border/20 transition-colors">
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 sticky-col">
                       <Link
                         to={`/companies/${company.id}`}
                         className="text-white hover:text-primary-400 font-medium text-sm"

@@ -157,6 +157,10 @@ export interface RecommendationDimensions {
   position: DimensionScore;
   composite_score: number | null;
   composite_verdict: string | null;
+  // Two-stage summary — separates "how good is the business" from
+  // "how attractive is the stock at today's price".
+  business_score: number | null;
+  valuation_score: number | null;
 }
 
 export interface Portfolio {

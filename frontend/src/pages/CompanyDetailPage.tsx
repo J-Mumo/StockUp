@@ -575,12 +575,12 @@ export default function CompanyDetailPage() {
 
         {/* Performance indicators */}
         {performanceMetrics.length > 0 && (
-          <div className="flex gap-1.5 mb-3">
+          <div className="flex gap-1.5 mb-3 overflow-x-auto -mx-1 px-1 sm:mx-0 sm:px-0 sm:overflow-visible snap-x snap-mandatory sm:snap-none">
             {performanceMetrics.map(({ period, label, pct }) => (
               <button
                 key={period}
                 onClick={() => setPricePeriod(period)}
-                className={`flex-1 flex flex-col items-center justify-center py-2.5 rounded-lg transition-colors whitespace-nowrap ${
+                className={`snap-start shrink-0 min-w-[72px] sm:min-w-0 sm:flex-1 flex flex-col items-center justify-center py-2.5 rounded-lg transition-colors whitespace-nowrap ${
                   pricePeriod === period
                     ? 'bg-[#2962FF]/20 border border-[#2962FF]/50'
                     : 'hover:bg-[#1e222d] border border-[#2a2e39]'
@@ -921,13 +921,43 @@ export default function CompanyDetailPage() {
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 pb-4 border-b border-dark-border">
                       <div>
                         <span className="text-gray-500 text-xs">Current Discount Rate</span>
-                        <p className="text-gray-300">{(assumptions.discount_rate * 100).toFixed(0)}%</p>
+                        <p className="text-gray-300">
+                          {calcDetails && (calcDetails.dcf as { discount_rate?: number })?.discount_rate != null
+                            ? ((calcDetails.dcf as { discount_rate: number }).discount_rate * 100).toFixed(0) + '%'
+                            : (assumptions.discount_rate * 100).toFixed(0) + '%'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 text-xs">Terminal Growth</span>
+                        <p className="text-gray-300">
+                          {calcDetails && (calcDetails.dcf as { terminal_growth_rate?: number })?.terminal_growth_rate != null
+                            ? ((calcDetails.dcf as { terminal_growth_rate: number }).terminal_growth_rate * 100).toFixed(1) + '%'
+                            : assumptions.terminal_growth_rate != null
+                              ? (assumptions.terminal_growth_rate * 100).toFixed(1) + '%'
+                              : '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 text-xs">Projection Years</span>
+                        <p className="text-gray-300">
+                          {calcDetails && (calcDetails.dcf as { projection_years?: number })?.projection_years != null
+                            ? (calcDetails.dcf as { projection_years: number }).projection_years
+                            : assumptions.projection_years ?? '—'}
+                        </p>
                       </div>
                       <div>
                         <span className="text-gray-500 text-xs">Growth Rate Used</span>
                         <p className="text-gray-300">
                           {calcDetails && (calcDetails.dcf as { growth_rate_used?: number })?.growth_rate_used != null
                             ? ((calcDetails.dcf as { growth_rate_used: number }).growth_rate_used * 100).toFixed(1) + '%'
+                            : '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 text-xs">Base FCF</span>
+                        <p className="text-gray-300">
+                          {calcDetails && (calcDetails.dcf as { base_fcf?: number })?.base_fcf != null
+                            ? fmtNum((calcDetails.dcf as { base_fcf: number }).base_fcf, 0)
                             : '—'}
                         </p>
                       </div>
@@ -948,6 +978,52 @@ export default function CompanyDetailPage() {
                                 .join(', ')
                             : '—'}
                         </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Bear / Base / Bull scenarios */}
+                  {valuation.scenario_values && Object.keys(valuation.scenario_values).length > 0 && (
+                    <div className="mb-4 pb-4 border-b border-dark-border">
+                      <p className="text-xs text-gray-400 mb-2 font-medium">
+                        📊 DCF Scenarios{' '}
+                        {calcDetails && (calcDetails.dcf as { growth_rate_used?: number })?.growth_rate_used != null && (
+                          <span className="text-gray-500 font-normal">
+                            (base FCF growth {((calcDetails.dcf as { growth_rate_used: number }).growth_rate_used * 100).toFixed(1)}%,
+                            bear/bull shift ±4pp)
+                          </span>
+                        )}
+                      </p>
+                      <div className="grid grid-cols-3 gap-3">
+                        {(['bear', 'base', 'bull'] as const).map((key) => {
+                          const iv = valuation.scenario_values?.[key];
+                          if (iv == null) return null;
+                          const price = valuation.current_market_price;
+                          const mos = price != null && iv > 0 ? 1 - price / iv : null;
+                          const color =
+                            key === 'bear' ? 'text-red-400 border-red-900/50' :
+                            key === 'bull' ? 'text-green-400 border-green-900/50' :
+                            'text-blue-400 border-blue-900/50';
+                          const mosColor =
+                            mos == null ? 'text-gray-500' :
+                            mos >= 0.2 ? 'text-green-400' :
+                            mos >= 0 ? 'text-yellow-400' :
+                            'text-red-400';
+                          return (
+                            <div key={key} className={`p-3 rounded-lg border ${color} bg-dark-surface/40`}>
+                              <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">{key}</p>
+                              <p className={`text-lg font-bold ${color.split(' ')[0]}`}>{fmtKES(iv)}</p>
+                              <p className="text-[10px] text-gray-500 mt-1">
+                                vs price {price != null ? fmtKES(price) : '—'}
+                              </p>
+                              {mos != null && (
+                                <p className={`text-xs mt-0.5 ${mosColor}`}>
+                                  MoS {(mos * 100).toFixed(0)}%
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -1498,20 +1574,20 @@ export default function CompanyDetailPage() {
                             {new Date(note.updated_at).toLocaleDateString('en-KE', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                           </p>
                         </div>
-                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                           <button
                             onClick={() => { setEditingNoteId(note.id); setEditNoteText(note.note_text); setEditNoteTag(note.tag || ''); }}
-                            className="text-gray-500 hover:text-primary-400 p-1"
+                            className="text-gray-500 hover:text-primary-400 p-2"
                             title="Edit"
                           >
-                            <Edit3 size={13} />
+                            <Edit3 size={14} />
                           </button>
                           <button
                             onClick={() => handleDeleteNote(note.id)}
-                            className="text-gray-500 hover:text-red-400 p-1"
+                            className="text-gray-500 hover:text-red-400 p-2"
                             title="Delete"
                           >
-                            <Trash2 size={13} />
+                            <Trash2 size={14} />
                           </button>
                         </div>
                       </div>
@@ -1525,17 +1601,17 @@ export default function CompanyDetailPage() {
       </div>
 
       {/* AI Chat */}
-      <div className="bg-dark-surface border border-dark-border rounded-xl p-6 mb-6">
-        <div className="flex items-center gap-2 mb-4">
+      <div className="bg-dark-surface border border-dark-border rounded-xl p-4 sm:p-6 mb-6">
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
           <Bot size={18} className="text-cyan-400" />
           <h3 className="text-lg font-semibold">AI Company Chat</h3>
           <span className="text-xs text-gray-500">Database-grounded with online validation</span>
         </div>
 
-        <div className="border border-dark-border rounded-lg p-3 bg-dark-bg max-h-96 overflow-y-auto space-y-3">
+        <div className="border border-dark-border rounded-lg p-3 bg-dark-bg max-h-[min(24rem,60vh)] overflow-y-auto space-y-3">
           {chatMessages.map((msg, idx) => (
             <div key={`${msg.role}-${idx}`} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
+              <div className={`max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap break-words ${
                 msg.role === 'user'
                   ? 'bg-primary-600 text-white'
                   : 'bg-dark-surface border border-dark-border text-gray-100'
@@ -1549,7 +1625,7 @@ export default function CompanyDetailPage() {
           )}
         </div>
 
-        <div className="mt-3 flex gap-2">
+        <div className="mt-3 flex flex-col sm:flex-row gap-2">
           <textarea
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
@@ -1567,7 +1643,7 @@ export default function CompanyDetailPage() {
           <button
             onClick={handleSendChat}
             disabled={!chatInput.trim() || chatLoading || chatCooldownSeconds > 0}
-            className="h-fit self-end flex items-center gap-1.5 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm px-3 py-2 rounded transition-colors"
+            className="sm:h-fit sm:self-end min-h-11 flex items-center justify-center gap-1.5 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm px-4 py-2 rounded transition-colors"
           >
             <Send size={14} /> Send
           </button>
