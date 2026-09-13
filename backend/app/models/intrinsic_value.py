@@ -1,7 +1,7 @@
 """IntrinsicValue model - computed valuations for companies."""
 
 from datetime import datetime, date
-from sqlalchemy import String, DateTime, Date, Numeric, Text, JSON, ForeignKey, Index
+from sqlalchemy import String, DateTime, Date, Numeric, Text, JSON, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -11,6 +11,10 @@ class IntrinsicValue(Base):
     __tablename__ = "intrinsic_values"
     __table_args__ = (
         Index("ix_intrinsic_company_date", "company_id", "valuation_date"),
+        UniqueConstraint(
+            "company_id", "valuation_date",
+            name="uq_intrinsic_company_date",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

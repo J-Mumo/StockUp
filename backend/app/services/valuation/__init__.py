@@ -97,7 +97,15 @@ def compute_valuation(
     )
     result = strategy.value(company, financials, market_price, assumptions)
 
-    # Persist snapshot
+    # Persist snapshot. Same-day upsert: drop any existing row for this
+    # (company_id, valuation_date) before insert so we don't accumulate
+    # duplicates on repeated computes. Enforced by the
+    # ``uq_intrinsic_company_date`` unique constraint.
+    db.query(IntrinsicValue).filter(
+        IntrinsicValue.company_id == company_id,
+        IntrinsicValue.valuation_date == valuation_date,
+    ).delete(synchronize_session=False)
+
     iv_record = IntrinsicValue(
         company_id=company_id,
         valuation_date=valuation_date,
