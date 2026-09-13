@@ -107,6 +107,8 @@ export interface IntrinsicValue {
   assumptions: Record<string, unknown> | null;
   calculation_details: Record<string, unknown> | null;
   calculated_at: string;
+  model_used: string | null;
+  scenario_values: Record<string, number> | null;
 }
 
 export interface Recommendation {

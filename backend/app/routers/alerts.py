@@ -169,7 +169,7 @@ def check_and_trigger_alerts(db: Session, company_id: int) -> list[Alert]:
     latest_val = (
         db.query(IntrinsicValue)
         .filter(IntrinsicValue.company_id == company_id)
-        .order_by(desc(IntrinsicValue.valuation_date))
+        .order_by(desc(IntrinsicValue.valuation_date), desc(IntrinsicValue.id))
         .first()
     )
 

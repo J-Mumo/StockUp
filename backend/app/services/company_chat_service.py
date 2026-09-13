@@ -251,7 +251,7 @@ def ask_company_chat(
     valuation = (
         db.query(IntrinsicValue)
         .filter(IntrinsicValue.company_id == company_id)
-        .order_by(desc(IntrinsicValue.valuation_date))
+        .order_by(desc(IntrinsicValue.valuation_date), desc(IntrinsicValue.id))
         .first()
     )
 

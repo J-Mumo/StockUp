@@ -110,10 +110,14 @@ def _latest_valuation_map(
     if not company_ids:
         return {}
 
-    latest_date_subq = (
+    # Use max(id) rather than max(valuation_date) so that when multiple
+    # IV rows share the same valuation_date (e.g. a Celery beat run at
+    # 13:00 and a manual revalue at 15:00 on the same day), we get the
+    # most-recently inserted one deterministically.
+    latest_id_subq = (
         db.query(
             IntrinsicValue.company_id,
-            func.max(IntrinsicValue.valuation_date).label("max_date"),
+            func.max(IntrinsicValue.id).label("max_id"),
         )
         .filter(IntrinsicValue.company_id.in_(company_ids))
         .group_by(IntrinsicValue.company_id)
@@ -123,9 +127,8 @@ def _latest_valuation_map(
     latest_vals: Sequence[IntrinsicValue] = (
         db.query(IntrinsicValue)
         .join(
-            latest_date_subq,
-            (IntrinsicValue.company_id == latest_date_subq.c.company_id)
-            & (IntrinsicValue.valuation_date == latest_date_subq.c.max_date),
+            latest_id_subq,
+            IntrinsicValue.id == latest_id_subq.c.max_id,
         )
         .all()
     )
@@ -249,7 +252,7 @@ def get_company_detail(db: Session, company_id: int) -> CompanyDetail | None:
     latest_val = (
         db.query(IntrinsicValue)
         .filter(IntrinsicValue.company_id == company.id)
-        .order_by(desc(IntrinsicValue.valuation_date))
+        .order_by(desc(IntrinsicValue.valuation_date), desc(IntrinsicValue.id))
         .first()
     )
 

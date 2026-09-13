@@ -219,16 +219,28 @@ def _extract_bank_inputs(
 
     latest = max(financials, key=lambda f: f.fiscal_year)
 
-    total_equity = get_numeric(latest.total_equity)
+    # Equity priority: shareholders_equity (attributable to parent, the correct
+    # base for per-share BVPS and ROE) → total_equity (may include minorities)
+    # → last resort. In practice audited filings report both; StockUp's ingest
+    # occasionally maps them inconsistently so we prefer the attributable
+    # figure explicitly.
+    total_equity = get_numeric(latest.shareholders_equity)
     if total_equity is None:
-        total_equity = get_numeric(latest.shareholders_equity)
+        total_equity = get_numeric(latest.total_equity)
     if total_equity is None or total_equity <= 0:
         return {}, "no_equity_data"
 
-    bvps = total_equity / shares_outstanding
+    # BVPS priority: reported book_value_per_share (already reconciled to
+    # attributable equity in the filing) → derived from equity/shares.
+    bvps = get_numeric(latest.book_value_per_share)
+    if bvps is None or bvps <= 0:
+        bvps = total_equity / shares_outstanding
+
     net_income = get_numeric(latest.net_income)
 
-    # ROE priority: reported → computed from net_income/equity.
+    # ROE priority: reported → computed from net_income/equity (using the
+    # same equity source as BVPS so justified P/B stays internally
+    # consistent).
     current_roe = get_numeric(latest.return_on_equity)
     if current_roe is None and net_income is not None and total_equity > 0:
         current_roe = net_income / total_equity

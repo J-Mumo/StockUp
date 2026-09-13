@@ -70,3 +70,5 @@ backend/celerybeat-schedule*
 
 # Ad-hoc local Postgres dumps
 *.dump
+
+deploy/.tmp-*

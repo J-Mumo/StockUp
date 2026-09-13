@@ -737,6 +737,24 @@ export default function CompanyDetailPage() {
             Valuation
           </h2>
           <div className="flex items-center gap-2">
+            {valuation?.model_used && (
+              <span
+                className="px-2 py-0.5 text-xs bg-purple-600/30 text-purple-300 rounded"
+                title={
+                  valuation.model_used === 'bank_residual_income'
+                    ? 'Bank valuator: residual income + justified P/B + justified P/E composite'
+                    : valuation.model_used === 'industrial_dcf'
+                      ? 'Industrial valuator: DCF + EPV + book value composite'
+                      : `Model: ${valuation.model_used}`
+                }
+              >
+                {valuation.model_used === 'bank_residual_income'
+                  ? 'Bank RI'
+                  : valuation.model_used === 'industrial_dcf'
+                    ? 'Industrial DCF'
+                    : valuation.model_used}
+              </span>
+            )}
             {isCustom && (
               <span className="px-2 py-0.5 text-xs bg-yellow-600/30 text-yellow-400 rounded">Custom</span>
             )}
@@ -774,13 +792,21 @@ export default function CompanyDetailPage() {
                 </p>
               </div>
               <div className="p-3 bg-dark-bg rounded-lg">
-                <p className="text-xs text-gray-400 mb-1">DCF Value</p>
+                <p className="text-xs text-gray-400 mb-1">
+                  {valuation.model_used === 'bank_residual_income'
+                    ? 'Residual Income'
+                    : 'DCF Value'}
+                </p>
                 <p className={`text-lg font-bold ${valuation.dcf_value ? 'text-blue-400' : 'text-gray-500'}`}>
                   {valuation.dcf_value ? fmtKES(valuation.dcf_value) : '—'}
                 </p>
               </div>
               <div className="p-3 bg-dark-bg rounded-lg">
-                <p className="text-xs text-gray-400 mb-1">EPV Value</p>
+                <p className="text-xs text-gray-400 mb-1">
+                  {valuation.model_used === 'bank_residual_income'
+                    ? 'Justified P/B'
+                    : 'EPV Value'}
+                </p>
                 <p className={`text-lg font-bold ${valuation.epv_value ? 'text-teal-400' : 'text-gray-500'}`}>
                   {valuation.epv_value ? fmtKES(valuation.epv_value) : '—'}
                 </p>
