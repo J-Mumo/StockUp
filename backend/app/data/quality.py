@@ -25,11 +25,13 @@ from app.models.financial_statement import FinancialStatement
 
 # Tolerances -----------------------------------------------------------------
 
-EPS_TOLERANCE = 0.15               # EPS vs NI/shares (banks routinely diluted)
+EPS_TOLERANCE = 0.10               # EPS vs NI/shares (banks routinely diluted)
 BVPS_TOLERANCE = 0.05
 ROE_TOLERANCE_ABS = 0.02           # 200 bps
 EQUITY_YOY_MIN = -0.40             # equity shouldn't drop >40% YoY
 EQUITY_YOY_MAX = 0.60              # or grow >60% YoY (excl. rights issues)
+BS_YOY_FLAT_EPS = 0.001            # < 0.1% YoY change on a balance-sheet total = duplicate ingest
+PL_SCALE_JUMP_RATIO = 50.0         # >50x YoY on revenue/NI = base-year data error
 
 
 # Result types ---------------------------------------------------------------
@@ -167,6 +169,45 @@ def validate_row(
                         f"probable interim / period-mismatch row",
                     )
                 )
+
+    # 4b. Balance-sheet YoY-flat anomaly: totals identical to the prior year
+    # (< 0.1% change) almost always mean the ingest re-used the prior row's
+    # value because the current-year figure was missing or mis-extracted.
+    if prev_row is not None:
+        for attr in ("total_assets", "total_liabilities", "shareholders_equity"):
+            prev_v = _f(getattr(prev_row, attr, None))
+            curr_v = _f(getattr(fs, attr, None))
+            if prev_v and curr_v and prev_v > 0:
+                change = abs(curr_v - prev_v) / prev_v
+                if change < BS_YOY_FLAT_EPS:
+                    report.issues.append(
+                        QualityIssue(
+                            attr,
+                            "warn",
+                            f"{attr}={curr_v:.0f} unchanged vs FY{prev_row.fiscal_year} "
+                            f"({change:+.4%} YoY); probable duplicate ingest / missing value",
+                        )
+                    )
+
+    # 4c. P&L scale-jump anomaly: revenue or NI jumping >50x YoY (either
+    # direction) is almost always a base-year data error (unit mismatch,
+    # partial-year row, restated base). Flag to keep CAGRs clean.
+    if prev_row is not None:
+        for attr in ("revenue", "net_income"):
+            prev_v = _f(getattr(prev_row, attr, None))
+            curr_v = _f(getattr(fs, attr, None))
+            if prev_v and curr_v and prev_v > 0 and curr_v > 0:
+                ratio = curr_v / prev_v
+                if ratio > PL_SCALE_JUMP_RATIO or ratio < 1.0 / PL_SCALE_JUMP_RATIO:
+                    report.issues.append(
+                        QualityIssue(
+                            attr,
+                            "warn",
+                            f"{attr} moved {ratio:.0f}x YoY "
+                            f"(FY{prev_row.fiscal_year}->FY{fs.fiscal_year}); "
+                            f"probable base-year data error",
+                        )
+                    )
 
     # 5. Period type must be annual for the valuation engine
     period_type = (fs.period_type or "annual").lower()

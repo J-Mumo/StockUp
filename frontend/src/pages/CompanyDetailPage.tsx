@@ -55,6 +55,14 @@ function fmtKES(value: number | null): string {
   return 'KES ' + value.toFixed(2);
 }
 
+// Prefer shareholders_equity (attributable to parent) over total_equity
+// (which can include minority interests). BVPS is derived from
+// shareholders_equity in the backend, so displaying total_equity here would
+// make the two look inconsistent to the user (e.g. KCB: 212B vs BVPS 88.06).
+function equityOf(fs: { total_equity: number | null; shareholders_equity: number | null }): number | null {
+  return fs.shareholders_equity ?? fs.total_equity;
+}
+
 function getDataSource(notes: string | null): { label: string; color: string } {
   if (!notes) return { label: 'Unknown', color: 'bg-gray-600' };
   if (notes.includes('[PDF annual report]')) return { label: 'PDF', color: 'bg-blue-600' };
@@ -778,6 +786,32 @@ export default function CompanyDetailPage() {
                 <p className="text-lg font-bold text-white">
                   {fmtKES(valuation.weighted_intrinsic_value)}
                 </p>
+                {valuation.iv_low != null && valuation.iv_high != null && (
+                  <p className="text-[10px] text-gray-500 mt-0.5">
+                    Range {fmtKES(valuation.iv_low)}–{fmtKES(valuation.iv_high)}
+                    {valuation.iv_confidence && (
+                      <span
+                        className={
+                          'ml-1 px-1 py-px rounded text-[9px] font-medium ' +
+                          (valuation.iv_confidence === 'high'
+                            ? 'bg-emerald-600/30 text-emerald-300'
+                            : valuation.iv_confidence === 'medium'
+                              ? 'bg-amber-600/30 text-amber-300'
+                              : 'bg-rose-600/30 text-rose-300')
+                        }
+                        title={
+                          valuation.iv_confidence === 'high'
+                            ? 'Scenario spread < 25% of base — models agree'
+                            : valuation.iv_confidence === 'medium'
+                              ? 'Scenario spread 25–60% of base — moderate disagreement'
+                              : 'Scenario spread > 60% of base — wide disagreement between conservative & strong cases'
+                        }
+                      >
+                        {valuation.iv_confidence.toUpperCase()}
+                      </span>
+                    )}
+                  </p>
+                )}
               </div>
               <div className="p-3 bg-dark-bg rounded-lg">
                 <p className="text-xs text-gray-400 mb-1">Margin of Safety</p>
@@ -972,6 +1006,34 @@ export default function CompanyDetailPage() {
                 <p className="text-sm text-gray-400 mb-1">
                   Quality Score: {recommendation.quality_score}/{recommendation.quality_max_score}
                 </p>
+                {recommendation.quality_subscores && recommendation.quality_subscores.length > 0 && (
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-3">
+                    {recommendation.quality_subscores.map((s, i) => {
+                      const pct = s.applicable && s.max_score > 0 ? s.score / s.max_score : 0;
+                      const color = !s.applicable
+                        ? 'bg-gray-600/30 text-gray-400'
+                        : pct >= 0.75
+                          ? 'bg-emerald-600/30 text-emerald-300'
+                          : pct >= 0.5
+                            ? 'bg-amber-600/30 text-amber-300'
+                            : 'bg-rose-600/30 text-rose-300';
+                      return (
+                        <div
+                          key={i}
+                          className={`px-2 py-1.5 rounded ${color} text-xs`}
+                          title={s.detail}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-medium">{s.name}</span>
+                            <span className="font-bold">
+                              {s.applicable ? `${s.score}/${s.max_score}` : 'n/a'}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 <ul className="list-disc list-inside text-gray-300 text-sm space-y-1">
                   {recommendation.quality_factors.map((f, i) => (
                     <li key={i} className={f.met ? 'text-gain' : 'text-gray-500'}>
@@ -1103,8 +1165,8 @@ export default function CompanyDetailPage() {
                       </td>
                       <td className="py-2.5 px-2 text-gray-300">{fmtNum(fs.operating_cash_flow)}</td>
                       <td className="py-2.5 px-2 text-gray-300">{fmtNum(fs.capital_expenditures)}</td>
-                      <td className={`py-2.5 px-2 ${fs.total_equity && fs.total_equity < 0 ? 'text-loss' : 'text-gray-300'}`}>
-                        {fmtNum(fs.total_equity)}
+                      <td className={`py-2.5 px-2 ${equityOf(fs) != null && equityOf(fs)! < 0 ? 'text-loss' : 'text-gray-300'}`}>
+                        {fmtNum(equityOf(fs))}
                       </td>
                       <td className="py-2.5 px-2 text-gray-300">
                         {fs.book_value_per_share != null ? fs.book_value_per_share.toFixed(2) : '—'}
@@ -1180,10 +1242,12 @@ export default function CompanyDetailPage() {
                   };
                   return sorted.map((fs, idx) => {
                     const prev = idx > 0 ? sorted[idx - 1] : null;
-                    const liabilities = fs.total_assets != null && fs.total_equity != null
-                      ? fs.total_assets - fs.total_equity : null;
-                    const prevLiabilities = prev && prev.total_assets != null && prev.total_equity != null
-                      ? prev.total_assets - prev.total_equity : null;
+                    const fsEquity = equityOf(fs);
+                    const prevEquity = prev ? equityOf(prev) : null;
+                    const liabilities = fs.total_assets != null && fsEquity != null
+                      ? fs.total_assets - fsEquity : null;
+                    const prevLiabilities = prev && prev.total_assets != null && prevEquity != null
+                      ? prev.total_assets - prevEquity : null;
                     return (
                       <tr key={fs.id} className="border-b border-dark-border/50 hover:bg-dark-border/10">
                         <td className="py-2.5 sticky left-0 bg-dark-surface">
@@ -1203,8 +1267,8 @@ export default function CompanyDetailPage() {
                         </td>
                         <td className="py-2.5 px-2 text-gray-300">{fmtB(fs.total_assets)}</td>
                         <td className="py-2.5 px-2">{fmtYoY(yoyPct(fs.total_assets, prev?.total_assets ?? null))}</td>
-                        <td className="py-2.5 px-2 text-gray-300">{fmtB(fs.total_equity)}</td>
-                        <td className="py-2.5 px-2">{fmtYoY(yoyPct(fs.total_equity, prev?.total_equity ?? null))}</td>
+                        <td className="py-2.5 px-2 text-gray-300">{fmtB(fsEquity)}</td>
+                        <td className="py-2.5 px-2">{fmtYoY(yoyPct(fsEquity, prevEquity))}</td>
                         <td className="py-2.5 px-2 text-gray-300">{fmtB(liabilities)}</td>
                         <td className="py-2.5 px-2">{fmtYoY(yoyPct(liabilities, prevLiabilities))}</td>
                       </tr>

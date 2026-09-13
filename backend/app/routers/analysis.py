@@ -169,6 +169,8 @@ def get_recommendation(
         quality_score=rec.quality.score,
         quality_max_score=rec.quality.max_score,
         quality_factors=[f.to_dict() for f in rec.quality.factors],
+        quality_subscores=rec.quality.subscores(),
+        sector_kind=rec.quality.sector_kind,
     )
 
 

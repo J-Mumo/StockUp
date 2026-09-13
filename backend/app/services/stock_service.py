@@ -460,7 +460,44 @@ def delete_financial(
 # Valuations
 # ---------------------------------------------------------------------------
 
+def _iv_range_and_confidence(
+    iv: IntrinsicValue,
+) -> tuple[float | None, float | None, str | None]:
+    """Derive (iv_low, iv_high, confidence) from ``scenario_values``.
+
+    Confidence buckets are based on the spread ratio (high - low) / base:
+      * spread < 25%  -> "high"
+      * spread < 60%  -> "medium"
+      * otherwise     -> "low"
+    Returns (None, None, None) for legacy rows without scenarios.
+    """
+    sv = iv.scenario_values or {}
+    low = sv.get("conservative")
+    high = sv.get("strong")
+    base = sv.get("base") or (float(iv.weighted_intrinsic_value)
+                              if iv.weighted_intrinsic_value is not None else None)
+    if low is None or high is None or not base:
+        return None, None, None
+    try:
+        low_f = float(low)
+        high_f = float(high)
+        base_f = float(base)
+    except (TypeError, ValueError):
+        return None, None, None
+    if base_f <= 0:
+        return low_f, high_f, None
+    spread = (high_f - low_f) / base_f
+    if spread < 0.25:
+        confidence = "high"
+    elif spread < 0.60:
+        confidence = "medium"
+    else:
+        confidence = "low"
+    return low_f, high_f, confidence
+
+
 def _valuation_to_schema(iv: IntrinsicValue) -> ValuationResponse:
+    iv_low, iv_high, iv_conf = _iv_range_and_confidence(iv)
     return ValuationResponse(
         id=iv.id,
         company_id=iv.company_id,
@@ -473,6 +510,11 @@ def _valuation_to_schema(iv: IntrinsicValue) -> ValuationResponse:
         margin_of_safety_pct=float(iv.margin_of_safety_pct) if iv.margin_of_safety_pct is not None else None,
         recommendation=iv.recommendation,
         recommendation_reason=iv.recommendation_reason,
+        model_used=iv.model_used,
+        scenario_values=iv.scenario_values,
+        iv_low=iv_low,
+        iv_high=iv_high,
+        iv_confidence=iv_conf,
         assumptions=iv.assumptions,
         calculation_details=iv.calculation_details,
         calculated_at=iv.calculated_at,

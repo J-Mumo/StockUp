@@ -65,12 +65,43 @@ class QualityScore:
         }
 
 
+# ---------------------------------------------------------------------------
+# Quality subscore decomposition
+#
+# The 10 individual factors roll up into 6 investor-facing dimensions so the
+# UI can show *why* a company got its aggregate score rather than just the
+# raw 6/10. Slot semantics differ per sector (see ``_assess_bank_quality``);
+# the mapping below reflects that. A dimension is skipped ("n/a") when every
+# feeding factor is ``insufficient_data`` — that's a signal, not a failure.
+# ---------------------------------------------------------------------------
+
+# Slot indexes into ``QualityAssessment.factors`` (order matches the append
+# sequence in ``_assess_industrial_quality`` / ``_assess_bank_quality``).
+_INDUSTRIAL_SUBSCORE_MAP: dict[str, list[int]] = {
+    "Profitability": [0],                # ROE
+    "Capital": [1, 8],                   # D/E, conservative debt
+    "Asset quality": [5],                # current ratio (proxy)
+    "Efficiency": [9],                   # capital efficiency (FCF/Rev)
+    "Growth": [2, 7],                    # earnings, revenue consistency
+    "Shareholder returns": [3, 4, 6],    # FCF, dividends, FCF increasing
+}
+_BANK_SUBSCORE_MAP: dict[str, list[int]] = {
+    "Profitability": [0],                # ROE
+    "Capital": [1],                      # capital adequacy
+    "Asset quality": [3],                # NPL / CoR composite
+    "Efficiency": [9],                   # cost/income
+    "Growth": [2, 6, 7],                 # earnings, earning-assets, NII
+    "Shareholder returns": [4],          # dividend consistency
+}
+
+
 @dataclass
 class QualityAssessment:
     """Complete quality assessment for a company."""
     factors: list[QualityScore] = field(default_factory=list)
     score: int = 0  # number of factors passed (0-10)
     max_score: int = 10
+    sector_kind: str = "industrial"  # "industrial" | "bank"; used for subscore map
 
     # Derived flags
     has_high_roe: bool = False
@@ -84,11 +115,57 @@ class QualityAssessment:
     has_conservative_debt: bool = False
     has_capital_efficiency: bool = False
 
+    def _subscore_map(self) -> dict[str, list[int]]:
+        return (
+            _BANK_SUBSCORE_MAP
+            if self.sector_kind == "bank"
+            else _INDUSTRIAL_SUBSCORE_MAP
+        )
+
+    def subscores(self) -> list[dict[str, Any]]:
+        """Return the 6-dimension breakdown as a list of ``{name, score,
+        max_score, passed, applicable, detail}`` dicts.
+
+        ``score`` is out of ``max_score`` (= number of applicable factors in
+        that dimension). ``applicable`` is False when every factor feeding
+        the dimension is marked ``insufficient_data`` (dimension is "n/a").
+        """
+        out: list[dict[str, Any]] = []
+        for name, slots in self._subscore_map().items():
+            applicable_factors: list[QualityScore] = []
+            for slot in slots:
+                if slot >= len(self.factors):
+                    continue
+                f = self.factors[slot]
+                if f.insufficient_data:
+                    continue
+                applicable_factors.append(f)
+            applicable = bool(applicable_factors)
+            passed_count = sum(1 for f in applicable_factors if f.passed)
+            total = len(applicable_factors)
+            out.append(
+                {
+                    "name": name,
+                    "score": passed_count,
+                    "max_score": total,
+                    "passed": applicable and passed_count == total,
+                    "applicable": applicable,
+                    "detail": (
+                        ", ".join(f.name for f in applicable_factors)
+                        if applicable
+                        else "n/a for this sector or insufficient data"
+                    ),
+                }
+            )
+        return out
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "factors": [f.to_dict() for f in self.factors],
             "score": self.score,
             "max_score": self.max_score,
+            "sector_kind": self.sector_kind,
+            "subscores": self.subscores(),
             "has_high_roe": self.has_high_roe,
             "has_low_leverage": self.has_low_leverage,
             "has_earnings_growth": self.has_earnings_growth,
@@ -166,7 +243,7 @@ def _assess_industrial_quality(
     Returns:
         QualityAssessment with individual factor results.
     """
-    assessment = QualityAssessment()
+    assessment = QualityAssessment(sector_kind="industrial")
     sorted_fs = sorted(financials, key=lambda f: f.fiscal_year)
 
     # Factor 1: ROE > 15% consistent (average ROE over available years)
@@ -280,9 +357,49 @@ def _assess_debt_to_equity(financials: list[FinancialStatement]) -> QualityScore
     )
 
 
+# Extreme scale jumps between two consecutive annual observations almost
+# always indicate a data-entry / unit / restated-base problem rather than a
+# real business event — a 200× or 50,000× YoY isn't achievable organically.
+# We trim such base years before computing growth so a single bad row doesn't
+# poison the CAGR headline.
+_ANOMALOUS_BASE_RATIO = 50.0
+
+
+def _trim_anomalous_base_years(
+    series: list[tuple[int, float]],
+) -> tuple[list[tuple[int, float]], list[int]]:
+    """Drop leading years whose value is negligibly small vs the next year.
+
+    Returns ``(trimmed_series, excluded_years)``. Only trims from the front
+    of the series — a large positive year followed by an outlier isn't a
+    base-year error, it's a business shock and should stay.
+    """
+    excluded: list[int] = []
+    trimmed = list(series)
+    while len(trimmed) >= 2:
+        (y0, v0), (_, v1) = trimmed[0], trimmed[1]
+        if v0 > 0 and v1 > 0 and v1 / v0 > _ANOMALOUS_BASE_RATIO:
+            excluded.append(y0)
+            trimmed = trimmed[1:]
+            continue
+        # Also drop a non-positive leading year — it can't seed a CAGR anyway.
+        if v0 <= 0 and v1 > 0 and len(trimmed) >= 3:
+            excluded.append(y0)
+            trimmed = trimmed[1:]
+            continue
+        break
+    return trimmed, excluded
+
+
 def _assess_earnings_growth(financials: list[FinancialStatement]) -> QualityScore:
-    """Earnings growth trend over 5+ years (or all available if < 5)."""
-    earnings = []
+    """Normalized earnings-growth trend as a CAGR.
+
+    * Filters out anomalous base years (e.g. a nominal 2020 figure that would
+      turn a real ~15% CAGR into a 43,000% "average") before computing.
+    * Reports the CAGR across the normalized period and the count of years
+      that grew YoY. ``passed`` = positive CAGR AND majority of years grew.
+    """
+    earnings: list[tuple[int, float]] = []
     for fs in financials:
         ni = _safe_float(fs.net_income)
         if ni is not None:
@@ -293,38 +410,66 @@ def _assess_earnings_growth(financials: list[FinancialStatement]) -> QualityScor
             name="Earnings Growth Trend",
             passed=False,
             value=None,
-            threshold="Positive trend over 5+ years",
+            threshold="Positive normalized CAGR (5+ years)",
             detail="Insufficient earnings data (need 2+ years)",
         )
 
-    # Calculate average YoY growth
-    growth_rates = []
-    for i in range(1, len(earnings)):
-        prev_val = earnings[i - 1][1]
-        if prev_val > 0:
-            growth = (earnings[i][1] - prev_val) / prev_val
-            growth_rates.append(growth)
-
-    if not growth_rates:
+    trimmed, excluded = _trim_anomalous_base_years(earnings)
+    if len(trimmed) < 2:
         return QualityScore(
             name="Earnings Growth Trend",
             passed=False,
             value=None,
-            threshold="Positive trend over 5+ years",
-            detail="Cannot compute growth (prior year earnings <= 0)",
+            threshold="Positive normalized CAGR (5+ years)",
+            detail=(
+                "Cannot compute growth after excluding anomalous base "
+                f"year(s): {', '.join(f'FY{y}' for y in excluded)}"
+            ),
         )
 
-    avg_growth = statistics.mean(growth_rates)
-    # Consider trend positive if avg growth > 0 and majority of years positive
-    positive_years = sum(1 for g in growth_rates if g > 0)
-    passed = avg_growth > 0 and positive_years > len(growth_rates) / 2
+    y_start, v_start = trimmed[0]
+    y_end, v_end = trimmed[-1]
+    n_years = y_end - y_start
+    cagr: float | None = None
+    if n_years > 0 and v_start > 0 and v_end > 0:
+        cagr = (v_end / v_start) ** (1.0 / n_years) - 1.0
+
+    positive_years = 0
+    total_pairs = 0
+    for i in range(1, len(trimmed)):
+        prev_val = trimmed[i - 1][1]
+        curr_val = trimmed[i][1]
+        if prev_val > 0:
+            total_pairs += 1
+            if curr_val > prev_val:
+                positive_years += 1
+
+    passed = (
+        cagr is not None
+        and cagr > 0
+        and total_pairs > 0
+        and positive_years > total_pairs / 2
+    )
+
+    if cagr is None:
+        detail = "Cannot compute CAGR (need positive start and end earnings)"
+    else:
+        detail = (
+            f"Normalized CAGR: {cagr:.1%} (FY{y_start}-FY{y_end}), "
+            f"{positive_years}/{total_pairs} years growing"
+        )
+    if excluded:
+        detail += (
+            f"; excluded {', '.join(f'FY{y}' for y in excluded)} "
+            f"(anomalous base — YoY jump > {_ANOMALOUS_BASE_RATIO:.0f}x)"
+        )
 
     return QualityScore(
         name="Earnings Growth Trend",
-        passed=passed,
-        value=round(avg_growth, 4),
-        threshold="Positive avg growth, majority of years positive",
-        detail=f"Avg growth: {avg_growth:.1%}, {positive_years}/{len(growth_rates)} years positive",
+        passed=bool(passed),
+        value=round(cagr, 4) if cagr is not None else None,
+        threshold="Positive CAGR + majority of years growing",
+        detail=detail,
     )
 
 
@@ -579,7 +724,7 @@ def _assess_bank_quality(
     financials: list[FinancialStatement],
 ) -> QualityAssessment:
     """Bank-specific quality assessment. See slot mapping above."""
-    assessment = QualityAssessment()
+    assessment = QualityAssessment(sector_kind="bank")
     sorted_fs = sorted(financials, key=lambda f: f.fiscal_year)
 
     # Slot 0: ROE > 18% (higher bar for banks)

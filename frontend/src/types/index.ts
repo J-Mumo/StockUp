@@ -109,6 +109,9 @@ export interface IntrinsicValue {
   calculated_at: string;
   model_used: string | null;
   scenario_values: Record<string, number> | null;
+  iv_low: number | null;
+  iv_high: number | null;
+  iv_confidence: 'high' | 'medium' | 'low' | null;
 }
 
 export interface Recommendation {
@@ -118,6 +121,15 @@ export interface Recommendation {
   quality_score: number;
   quality_max_score: number;
   quality_factors: Array<{ name: string; met: boolean; description: string }>;
+  quality_subscores?: Array<{
+    name: string;
+    score: number;
+    max_score: number;
+    passed: boolean;
+    applicable: boolean;
+    detail: string;
+  }>;
+  sector_kind?: string | null;
 }
 
 export interface Portfolio {

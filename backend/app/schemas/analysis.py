@@ -116,3 +116,8 @@ class RecommendationResponse(BaseModel):
     quality_score: int
     quality_max_score: int
     quality_factors: list[dict[str, Any]] = []
+    # Aggregated 6-dimension breakdown for the UI. Populated from
+    # ``QualityAssessment.subscores()``. Each entry has:
+    # ``{name, score, max_score, passed, applicable, detail}``.
+    quality_subscores: list[dict[str, Any]] = []
+    sector_kind: str | None = None

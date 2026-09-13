@@ -206,6 +206,14 @@ class ValuationResponse(BaseModel):
     model_used: str | None = None
     scenario_values: dict[str, float] | None = None
 
+    # Decision-range summary derived from ``scenario_values`` for the UI.
+    # ``iv_low`` / ``iv_high`` are the conservative / strong scenarios.
+    # ``iv_confidence`` is "high" | "medium" | "low" based on scenario
+    # spread; NULL when scenarios weren't recorded (legacy rows).
+    iv_low: float | None = None
+    iv_high: float | None = None
+    iv_confidence: str | None = None
+
     assumptions: dict[str, Any] | None = None
     calculation_details: dict[str, Any] | None = None
 
