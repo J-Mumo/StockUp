@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { RecommendationDimensions, DimensionScore } from '../types';
+import type { RecommendationDimensions, DimensionScore, ExpectedReturn } from '../types';
 import { useLearnStore } from '../store/learnStore';
 import { getMetric } from '../lib/metrics/registry';
 import { Info } from 'lucide-react';
@@ -13,6 +13,8 @@ import { Info } from 'lucide-react';
  */
 interface Props {
   dimensions: RecommendationDimensions;
+  /** Forward return decomposition from IntrinsicValue.calculation_details. */
+  expectedReturn?: ExpectedReturn | null;
 }
 
 // Maps a dimension's `name` (as returned by the backend) to the learn-mode
@@ -121,13 +123,15 @@ function DimensionRow({ dim }: { dim: DimensionScore }) {
   );
 }
 
-/** Business vs Valuation two-stage tile row. */
-function TwoStageSummary({
+/** Business vs Valuation vs Expected-Return three-tile summary. */
+function ThreeStageSummary({
   businessScore,
   valuationScore,
+  expectedReturn,
 }: {
   businessScore: number | null;
   valuationScore: number | null;
+  expectedReturn?: ExpectedReturn | null;
 }) {
   const tile = (
     label: string,
@@ -154,15 +158,72 @@ function TwoStageSummary({
       </div>
     );
   };
+
+  // Expected return tile: shows the base scenario's annualised return as
+  // a %, colour-coded against a rough Kenya 10y T-bond hurdle (~14%). The
+  // subtitle collapses bear/bull into a compact range.
+  const erTile = () => {
+    const base = expectedReturn?.scenarios.base
+      ?? expectedReturn?.scenarios.conservative
+      ?? null;
+    const applicable = base !== null;
+    // We deliberately eyeball the bond hurdle rather than pull it live —
+    // this is a heuristic, not a screening filter.
+    const BOND_HURDLE = 0.14;
+    const returnColor = (r: number | null): string => {
+      if (r === null) return 'text-gray-500';
+      if (r >= BOND_HURDLE) return 'text-emerald-400';
+      if (r >= 0.10) return 'text-teal-400';
+      if (r >= 0.05) return 'text-amber-400';
+      if (r >= 0) return 'text-orange-400';
+      return 'text-rose-400';
+    };
+    const bear = expectedReturn?.scenarios.bear
+      ?? expectedReturn?.scenarios.conservative
+      ?? null;
+    const bull = expectedReturn?.scenarios.bull
+      ?? expectedReturn?.scenarios.strong
+      ?? null;
+    const horizon = expectedReturn?.horizon_years ?? 5;
+    return (
+      <div className="flex-1 p-3 rounded-lg border border-dark-border bg-dark-surface/40">
+        <div className="flex items-baseline justify-between mb-1">
+          <span className="text-xs uppercase tracking-wide text-gray-400">
+            Expected Return
+          </span>
+          <span className={`text-lg font-bold ${returnColor(base?.annualized_return ?? null)}`}>
+            {applicable ? `${(base!.annualized_return * 100).toFixed(1)}%` : 'n/a'}
+          </span>
+        </div>
+        {applicable && bear && bull ? (
+          <p className="text-[10px] text-gray-400 leading-tight mb-1">
+            {horizon}y annualised · range{' '}
+            <span className="text-rose-400">{(bear.annualized_return * 100).toFixed(1)}%</span>
+            {' → '}
+            <span className="text-emerald-400">{(bull.annualized_return * 100).toFixed(1)}%</span>
+          </p>
+        ) : (
+          <p className="text-[10px] text-gray-500 leading-tight mb-1">
+            {horizon}y annualised
+          </p>
+        )}
+        <p className="text-[10px] text-gray-500 leading-tight">
+          Buy-and-hold return vs T-bond ~{(BOND_HURDLE * 100).toFixed(0)}%
+        </p>
+      </div>
+    );
+  };
+
   return (
-    <div className="mb-3 flex gap-2">
+    <div className="mb-3 flex flex-col md:flex-row gap-2">
       {tile('Business', businessScore, 'How good is the company? (Quality + Trend)')}
       {tile('Valuation', valuationScore, 'How attractive at today\u2019s price?')}
+      {erTile()}
     </div>
   );
 }
 
-export default function RecommendationScorecard({ dimensions }: Props) {
+export default function RecommendationScorecard({ dimensions, expectedReturn }: Props) {
   const composite = dimensions.composite_score;
   const verdict = dimensions.composite_verdict;
   const verdictClass = (verdict && verdictColors[verdict]) || 'bg-gray-600 text-white';
@@ -198,10 +259,13 @@ export default function RecommendationScorecard({ dimensions }: Props) {
 
       {/* Two-stage Business vs Valuation summary — separates "how good is
           the business" from "how attractive is the price". */}
-      {(dimensions.business_score !== null || dimensions.valuation_score !== null) && (
-        <TwoStageSummary
+      {(dimensions.business_score !== null
+        || dimensions.valuation_score !== null
+        || expectedReturn) && (
+        <ThreeStageSummary
           businessScore={dimensions.business_score}
           valuationScore={dimensions.valuation_score}
+          expectedReturn={expectedReturn}
         />
       )}
 

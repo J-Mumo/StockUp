@@ -110,6 +110,22 @@ class ValuationResult:
     component_values: dict[str, float] = field(default_factory=dict)
     quality_adjustments: dict[str, float] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    # Expected forward annualised return, decomposed by scenario. Populated
+    # when we have (a) a market price and (b) at least a base scenario IV.
+    # Shape:
+    #   {
+    #     "horizon_years": int,
+    #     "dividend_yield_used": float,
+    #     "scenarios": {
+    #       "bear"|"base"|"bull": {
+    #         "annualized_return": float,
+    #         "capital_cagr": float,
+    #         "iv_at_horizon": float,
+    #         "growth_rate": float,
+    #       }, ...
+    #     },
+    #   }
+    expected_return: dict[str, Any] | None = None
 
     def to_calculation_details(self) -> dict[str, Any]:
         return {
@@ -122,6 +138,7 @@ class ValuationResult:
             "component_values": self.component_values,
             "quality_adjustments": self.quality_adjustments,
             "notes": self.notes,
+            "expected_return": self.expected_return,
         }
 
 
@@ -167,3 +184,59 @@ def calculate_margin_of_safety(
     if intrinsic_value <= 0:
         return None
     return 1.0 - (market_price / intrinsic_value)
+
+
+def calculate_expected_return(
+    *,
+    scenario_ivs: dict[str, float],
+    scenario_growth_rates: dict[str, float],
+    market_price: float | None,
+    dividend_yield: float,
+    horizon_years: int = 5,
+) -> dict[str, Any] | None:
+    """Buffett-style forward-return decomposition.
+
+    Assumes that at ``horizon_years`` the market re-rates each scenario's IV
+    forward at its own growth rate:
+
+        IV_N       = IV_today * (1 + g) ** N
+        capital_cagr   = (IV_N / P_today) ** (1 / N) - 1
+        annualized_return ≈ capital_cagr + dividend_yield
+
+    The dividend contribution is approximated as the current trailing yield
+    held flat over the horizon. That's a first-order approximation and it
+    matters most for high-yield names; growth stocks are dominated by
+    capital return.
+
+    Returns ``None`` if ``market_price`` is missing / non-positive or no
+    scenarios are available.
+    """
+    if market_price is None or market_price <= 0 or not scenario_ivs:
+        return None
+    if horizon_years <= 0:
+        return None
+
+    div_yield = max(0.0, dividend_yield or 0.0)
+    per_scenario: dict[str, dict[str, float]] = {}
+    for name, iv in scenario_ivs.items():
+        if iv is None or iv <= 0:
+            continue
+        g = scenario_growth_rates.get(name, 0.0)
+        iv_horizon = iv * ((1 + g) ** horizon_years)
+        capital_cagr = (iv_horizon / market_price) ** (1 / horizon_years) - 1
+        annualized = capital_cagr + div_yield
+        per_scenario[name] = {
+            "annualized_return": round(annualized, 4),
+            "capital_cagr": round(capital_cagr, 4),
+            "iv_at_horizon": round(iv_horizon, 4),
+            "growth_rate": round(g, 4),
+        }
+
+    if not per_scenario:
+        return None
+
+    return {
+        "horizon_years": horizon_years,
+        "dividend_yield_used": round(div_yield, 4),
+        "scenarios": per_scenario,
+    }

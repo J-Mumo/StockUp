@@ -33,6 +33,7 @@ from .base import (
     EPVResult,
     SectorValuator,
     ValuationResult,
+    calculate_expected_return,
     calculate_margin_of_safety,
     get_numeric,
 )
@@ -70,6 +71,8 @@ BANK_DEFAULT_ASSUMPTIONS: dict[str, Any] = {
     "strong_cost_of_equity": 0.135,
     "strong_payout": 0.25,
     # Scenario computed by using current ROE as sustainable ROE
+    # Horizon used for the Buffett-style expected return computation.
+    "expected_return_horizon_years": 5,
 }
 
 
@@ -180,6 +183,31 @@ class BankValuator(SectorValuator):
                 f"CAR={inputs.get('capital_adequacy_ratio')})"
             )
 
+        # --- Expected forward return ---------------------------------------
+        # Growth per scenario = sustainable ROE × (1 − payout), capped at
+        # ``max_growth_cap`` and floored at 0. Dividend contribution is
+        # approximated as the trailing DPS / current price yield.
+        scenario_growth = {
+            name: _bank_scenario_growth(inputs, params, name)
+            for name in scenario_values
+        }
+        div_yield = _bank_trailing_dividend_yield(inputs, market_price)
+        horizon = int(params.get("expected_return_horizon_years", 5))
+        expected_return = calculate_expected_return(
+            scenario_ivs=scenario_values,
+            scenario_growth_rates=scenario_growth,
+            market_price=market_price,
+            dividend_yield=div_yield,
+            horizon_years=horizon,
+        )
+        if expected_return is not None:
+            base_er = expected_return["scenarios"].get("base", {}).get("annualized_return")
+            if base_er is not None:
+                notes.append(
+                    f"expected {horizon}y return (base): {base_er:.1%} "
+                    f"(div yield {div_yield:.1%})"
+                )
+
         return ValuationResult(
             dcf=dcf,
             epv=epv,
@@ -194,6 +222,7 @@ class BankValuator(SectorValuator):
             component_values=component_values,
             quality_adjustments=quality_adjustments,
             notes=notes,
+            expected_return=expected_return,
         )
 
 
@@ -422,6 +451,48 @@ def _compute_scenario(
         base_params["max_quality_discount"],
     )
     return value * (1 - penalty)
+
+
+def _bank_scenario_growth(
+    inputs: dict[str, Any],
+    params: dict[str, Any],
+    scenario: str,
+) -> float:
+    """Retention-growth implied by each scenario: g = ROE × (1 − payout).
+
+    Capped by ``max_growth_cap`` and floored at 0 so we don't project
+    unrealistic near-term compounding into the expected-return math.
+    """
+    if scenario == "conservative":
+        roe = params["sustainable_roe_floor"]
+        payout = params["conservative_payout"]
+    elif scenario == "strong":
+        roe = min(inputs["current_roe"], params["current_roe_cap"])
+        payout = params["strong_payout"]
+    else:  # base
+        roe = inputs["sustainable_roe"]
+        payout = inputs["payout"]
+    g = float(roe) * (1.0 - float(payout))
+    return max(0.0, min(float(params["max_growth_cap"]), g))
+
+
+def _bank_trailing_dividend_yield(
+    inputs: dict[str, Any],
+    market_price: float | None,
+) -> float:
+    """Latest DPS / current price. 0.0 when either is missing."""
+    if not market_price or market_price <= 0:
+        return 0.0
+    dps = inputs.get("dps")
+    if dps is None:
+        # Fall back to payout × eps
+        eps = inputs.get("eps")
+        payout = inputs.get("payout")
+        if eps is not None and payout is not None and eps > 0:
+            dps = eps * payout
+    if dps is None or dps <= 0:
+        return 0.0
+    return float(dps) / market_price
 
 
 # ---------------------------------------------------------------------------

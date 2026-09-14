@@ -21,6 +21,7 @@ from .base import (
     EPVResult,
     SectorValuator,
     ValuationResult,
+    calculate_expected_return,
     calculate_margin_of_safety,
     get_numeric,
 )
@@ -50,6 +51,8 @@ DEFAULT_ASSUMPTIONS: dict[str, Any] = {
     # percentage points either side of ``growth_rate_used`` (still capped
     # by max_growth_rate_cap / min_growth_rate_floor).
     "scenario_growth_delta": 0.04,
+    # Horizon used for the Buffett-style expected return computation.
+    "expected_return_horizon_years": 5,
 }
 
 
@@ -303,6 +306,7 @@ class IndustrialValuator(SectorValuator):
         # Only meaningful when the base DCF succeeded; otherwise we surface
         # nothing and let the frontend show a fallback.
         scenario_values: dict[str, float] = {}
+        scenario_growth: dict[str, float] = {}
         notes: list[str] = []
         if (
             dcf.intrinsic_value_per_share is not None
@@ -342,10 +346,32 @@ class IndustrialValuator(SectorValuator):
                     "base": round(float(dcf.intrinsic_value_per_share), 4),
                     "bull": round(bull_iv, 4),
                 }
+                scenario_growth = {"bear": bear_g, "base": base_g, "bull": bull_g}
                 notes.append(
                     f"scenarios: bear g={bear_g:.2%}, base g={base_g:.2%}, "
                     f"bull g={bull_g:.2%} (discount={dcf.discount_rate:.2%}, "
                     f"terminal={dcf.terminal_growth_rate:.2%})"
+                )
+
+        # --- Expected forward return ---------------------------------------
+        # Uses scenarios computed above + trailing dividend yield. Assumes
+        # that at horizon N the market re-rates to fair value, with IV
+        # compounding at each scenario's growth rate.
+        div_yield = _trailing_dividend_yield(financials, market_price)
+        horizon = int(params.get("expected_return_horizon_years", 5))
+        expected_return = calculate_expected_return(
+            scenario_ivs=scenario_values,
+            scenario_growth_rates=scenario_growth,
+            market_price=market_price,
+            dividend_yield=div_yield,
+            horizon_years=horizon,
+        )
+        if expected_return is not None:
+            base_er = expected_return["scenarios"].get("base", {}).get("annualized_return")
+            if base_er is not None:
+                notes.append(
+                    f"expected {horizon}y return (base): {base_er:.1%} "
+                    f"(div yield {div_yield:.1%})"
                 )
 
         return ValuationResult(
@@ -360,6 +386,7 @@ class IndustrialValuator(SectorValuator):
             model_used=self.model_name,
             scenario_values=scenario_values,
             notes=notes,
+            expected_return=expected_return,
         )
 
 
@@ -392,6 +419,20 @@ def _dcf_value_for_growth(
     terminal_value = (final_fcf * (1 + terminal_growth)) / (discount_rate - terminal_growth)
     pv_terminal = terminal_value / ((1 + discount_rate) ** n_years)
     return (pv_fcfs + pv_terminal) / shares
+
+
+def _trailing_dividend_yield(
+    financials: list[FinancialStatement],
+    market_price: float | None,
+) -> float:
+    """Latest reported DPS / current price. 0.0 when either is missing."""
+    if not financials or not market_price or market_price <= 0:
+        return 0.0
+    latest = max(financials, key=lambda f: f.fiscal_year)
+    dps = get_numeric(latest.dividends_per_share)
+    if dps is None or dps <= 0:
+        return 0.0
+    return dps / market_price
 
 
 # ---------------------------------------------------------------------------

@@ -163,6 +163,29 @@ export interface RecommendationDimensions {
   valuation_score: number | null;
 }
 
+/**
+ * Forward-looking expected return, decomposed by valuation scenario.
+ *
+ * Lives inside ``IntrinsicValue.calculation_details.expected_return`` and
+ * answers "if I put money in at today's price, what annualised return can
+ * I reasonably expect over the horizon?"
+ */
+export interface ExpectedReturnScenario {
+  annualized_return: number;   // capital_cagr + dividend_yield_used
+  capital_cagr: number;        // from IV re-rating over horizon
+  iv_at_horizon: number;       // IV_0 × (1 + growth_rate) ** horizon_years
+  growth_rate: number;         // scenario-specific growth rate applied
+}
+
+export interface ExpectedReturn {
+  horizon_years: number;
+  dividend_yield_used: number;
+  scenarios: Partial<Record<
+    'bear' | 'base' | 'bull' | 'conservative' | 'strong',
+    ExpectedReturnScenario
+  >>;
+}
+
 export interface Portfolio {
   id: number;
   user_id: number;

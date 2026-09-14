@@ -1028,6 +1028,74 @@ export default function CompanyDetailPage() {
                     </div>
                   )}
 
+                  {/* Expected forward return per scenario --------------------
+                      Converts each scenario's IV + growth into an
+                      annualised return you could realistically earn at
+                      today's price. This is what makes the model
+                      comparable across assets (banks, industrials,
+                      T-bonds). */}
+                  {(() => {
+                    const er = calcDetails?.expected_return as import('../types').ExpectedReturn | null | undefined;
+                    if (!er || !er.scenarios) return null;
+                    const orderedKeys = (['bear', 'base', 'bull', 'conservative', 'strong'] as const)
+                      .filter((k) => er.scenarios[k]);
+                    if (orderedKeys.length === 0) return null;
+                    const BOND_HURDLE = 0.14;
+                    const returnColor = (r: number): string => {
+                      if (r >= BOND_HURDLE) return 'text-emerald-400 border-emerald-900/50';
+                      if (r >= 0.10) return 'text-teal-400 border-teal-900/50';
+                      if (r >= 0.05) return 'text-amber-400 border-amber-900/50';
+                      if (r >= 0) return 'text-orange-400 border-orange-900/50';
+                      return 'text-rose-400 border-rose-900/50';
+                    };
+                    return (
+                      <div className="mb-4 pb-4 border-b border-dark-border">
+                        <p className="text-xs text-gray-400 mb-2 font-medium">
+                          💰 Expected Annualised Return{' '}
+                          <span className="text-gray-500 font-normal">
+                            ({er.horizon_years}y horizon, dividend yield{' '}
+                            {(er.dividend_yield_used * 100).toFixed(2)}%, vs T-bond ~{(BOND_HURDLE * 100).toFixed(0)}%)
+                          </span>
+                        </p>
+                        <div className={`grid gap-3 ${orderedKeys.length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                          {orderedKeys.map((key) => {
+                            const scen = er.scenarios[key]!;
+                            const cls = returnColor(scen.annualized_return);
+                            const border = cls.split(' ')[1] ?? '';
+                            const text = cls.split(' ')[0] ?? '';
+                            return (
+                              <div
+                                key={key}
+                                className={`p-3 rounded-lg border ${border} bg-dark-surface/40`}
+                              >
+                                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">
+                                  {key}
+                                </p>
+                                <p className={`text-lg font-bold ${text}`}>
+                                  {(scen.annualized_return * 100).toFixed(1)}%
+                                </p>
+                                <p className="text-[10px] text-gray-500 mt-1 leading-tight">
+                                  capital {(scen.capital_cagr * 100).toFixed(1)}% + div{' '}
+                                  {(er.dividend_yield_used * 100).toFixed(1)}%
+                                </p>
+                                <p className="text-[10px] text-gray-500 leading-tight">
+                                  IV at yr {er.horizon_years}: {fmtKES(scen.iv_at_horizon)}
+                                </p>
+                                <p className="text-[10px] text-gray-500 leading-tight">
+                                  growth {(scen.growth_rate * 100).toFixed(1)}%
+                                </p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <p className="text-[10px] text-gray-500 mt-2 leading-tight">
+                          Assumes at horizon the market re-rates to fair value (IV compounded at each
+                          scenario's growth rate) and dividends are received at today's yield.
+                        </p>
+                      </div>
+                    );
+                  })()}
+
                   {/* Editable inputs */}
                   <p className="text-xs text-gray-400 mb-3 font-medium">✏️ Custom Assumptions (edit & recompute to stress-test)</p>
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-3">
@@ -1126,7 +1194,12 @@ export default function CompanyDetailPage() {
             <p className="text-sm text-gray-400 mb-2">Analysis:</p>
             <p className="text-gray-300 text-sm">{recommendation.reason}</p>
             {recommendation.dimensions && (
-              <RecommendationScorecard dimensions={recommendation.dimensions} />
+              <RecommendationScorecard
+                dimensions={recommendation.dimensions}
+                expectedReturn={
+                  (calcDetails?.expected_return as import('../types').ExpectedReturn | null | undefined) ?? null
+                }
+              />
             )}
             {recommendation.quality_factors.length > 0 && (
               <div className="mt-3">

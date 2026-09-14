@@ -629,4 +629,144 @@ class TestIndustrialScenarios:
         assert wide.scenario_values["bear"] < narrow.scenario_values["bear"]
 
 
+class TestExpectedReturn:
+    """Buffett-style forward return decomposition on IndustrialValuator."""
+
+    def _company(self, shares: int = 100_000_000) -> Company:
+        c = MagicMock(spec=Company)
+        c.id = 1
+        c.shares_outstanding = shares
+        c.sector = "Manufacturing"
+        return c
+
+    def _standard_financials(self, latest_dps: float | None = None):
+        return [
+            _make_fs(2021, free_cash_flow=1_000_000_000, net_income=1e9, revenue=5e9),
+            _make_fs(2022, free_cash_flow=1_100_000_000, net_income=1e9, revenue=5e9),
+            _make_fs(2023, free_cash_flow=1_200_000_000, net_income=1e9, revenue=5e9),
+            _make_fs(2024, free_cash_flow=1_300_000_000, net_income=1e9, revenue=5e9),
+            _make_fs(2025, free_cash_flow=1_400_000_000, net_income=1e9, revenue=5e9,
+                     total_equity=8e9, dividends_per_share=latest_dps),
+        ]
+
+    def test_expected_return_shape_and_scenarios(self):
+        """Populated dict with the three scenarios when DCF succeeds."""
+        from app.services.valuation.industrial import IndustrialValuator
+
+        result = IndustrialValuator().value(
+            company=self._company(),
+            financials=self._standard_financials(latest_dps=2.0),
+            market_price=50.0,
+        )
+        er = result.expected_return
+        assert er is not None
+        assert er["horizon_years"] == 5
+        assert set(er["scenarios"].keys()) == {"bear", "base", "bull"}
+        for scen in er["scenarios"].values():
+            assert "annualized_return" in scen
+            assert "capital_cagr" in scen
+            assert "iv_at_horizon" in scen
+            assert "growth_rate" in scen
+
+    def test_expected_return_monotonic_across_scenarios(self):
+        """Bear ≤ base ≤ bull in annualised return terms."""
+        from app.services.valuation.industrial import IndustrialValuator
+
+        result = IndustrialValuator().value(
+            company=self._company(),
+            financials=self._standard_financials(latest_dps=2.0),
+            market_price=50.0,
+        )
+        s = result.expected_return["scenarios"]
+        assert s["bear"]["annualized_return"] <= s["base"]["annualized_return"]
+        assert s["base"]["annualized_return"] <= s["bull"]["annualized_return"]
+
+    def test_expected_return_dividend_yield_contribution(self):
+        """Higher DPS ⇒ higher annualised return, all else equal."""
+        from app.services.valuation.industrial import IndustrialValuator
+
+        no_div = IndustrialValuator().value(
+            company=self._company(),
+            financials=self._standard_financials(latest_dps=None),
+            market_price=50.0,
+        )
+        with_div = IndustrialValuator().value(
+            company=self._company(),
+            financials=self._standard_financials(latest_dps=2.0),
+            market_price=50.0,
+        )
+        base_no = no_div.expected_return["scenarios"]["base"]["annualized_return"]
+        base_yes = with_div.expected_return["scenarios"]["base"]["annualized_return"]
+        # DPS 2 / price 50 = 4% yield uplift, other components unchanged.
+        assert with_div.expected_return["dividend_yield_used"] == pytest.approx(0.04, abs=1e-6)
+        assert no_div.expected_return["dividend_yield_used"] == 0.0
+        assert base_yes == pytest.approx(base_no + 0.04, abs=1e-6)
+
+    def test_expected_return_horizon_configurable(self):
+        """Longer horizon compounds growth further into ``iv_at_horizon``."""
+        from app.services.valuation.industrial import IndustrialValuator
+
+        short = IndustrialValuator().value(
+            company=self._company(),
+            financials=self._standard_financials(),
+            market_price=50.0,
+            assumptions={"expected_return_horizon_years": 3},
+        )
+        long = IndustrialValuator().value(
+            company=self._company(),
+            financials=self._standard_financials(),
+            market_price=50.0,
+            assumptions={"expected_return_horizon_years": 10},
+        )
+        assert short.expected_return["horizon_years"] == 3
+        assert long.expected_return["horizon_years"] == 10
+        # With positive growth, IV at horizon must be strictly larger for a
+        # longer horizon.
+        assert (
+            long.expected_return["scenarios"]["base"]["iv_at_horizon"]
+            > short.expected_return["scenarios"]["base"]["iv_at_horizon"]
+        )
+
+    def test_expected_return_none_when_no_scenarios(self):
+        """No DCF ⇒ no scenarios ⇒ expected_return is None."""
+        from app.services.valuation.industrial import IndustrialValuator
+
+        financials = [
+            _make_fs(2024, free_cash_flow=1e9, net_income=1e9, revenue=5e9),
+            _make_fs(2025, free_cash_flow=1e9, net_income=1e9, revenue=5e9,
+                     total_equity=8e9),
+        ]
+        result = IndustrialValuator().value(
+            company=self._company(),
+            financials=financials,
+            market_price=50.0,
+        )
+        assert result.scenario_values == {}
+        assert result.expected_return is None
+
+    def test_expected_return_none_when_no_market_price(self):
+        """Cannot compute forward return without an anchor price."""
+        from app.services.valuation.industrial import IndustrialValuator
+
+        result = IndustrialValuator().value(
+            company=self._company(),
+            financials=self._standard_financials(),
+            market_price=None,
+        )
+        assert result.expected_return is None
+
+    def test_expected_return_serialized_in_calculation_details(self):
+        """Persists through ValuationResult.to_calculation_details()."""
+        from app.services.valuation.industrial import IndustrialValuator
+
+        result = IndustrialValuator().value(
+            company=self._company(),
+            financials=self._standard_financials(latest_dps=2.0),
+            market_price=50.0,
+        )
+        details = result.to_calculation_details()
+        assert "expected_return" in details
+        assert details["expected_return"]["scenarios"]["base"]["annualized_return"] == \
+            result.expected_return["scenarios"]["base"]["annualized_return"]
+
 
