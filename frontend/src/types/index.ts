@@ -418,6 +418,35 @@ export interface ChatHistoryResponse {
   messages: ChatHistoryItem[];
 }
 
+// -----------------------------------------------------------------------
+// AI-generated per-company research narrative
+// -----------------------------------------------------------------------
+
+export interface CompanyAIAnalysisStructured {
+  verdict?: string | null;
+  iv_low_kes?: number | null;
+  iv_high_kes?: number | null;
+  bull_points?: string[] | null;
+  bear_points?: string[] | null;
+  key_risks?: string[] | null;
+  caveats?: string[] | null;
+  sector_specific_notes?: string[] | null;
+}
+
+export interface CompanyAIAnalysis {
+  id: number;
+  company_id: number;
+  generated_at: string;
+  model_name: string;
+  prompt_version: string;
+  input_fingerprint: string;
+  sector_kind: string | null;
+  narrative_md: string;
+  structured_json: CompanyAIAnalysisStructured | null;
+  triggered_by: string;
+  from_cache: boolean;
+}
+
 export type GoalCategory = 'financial' | 'strategic' | 'esg' | 'operational';
 export type GoalStatus =
   | 'achieved'

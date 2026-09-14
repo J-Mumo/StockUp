@@ -12,6 +12,7 @@ import GoalsSection from '../components/GoalsSection';
 import RecommendationScorecard from '../components/RecommendationScorecard';
 import MetricLabel from '../components/learn/MetricLabel';
 import BankHealthCard from '../components/BankHealthCard';
+import CompanyAIAnalysisCard from '../components/CompanyAIAnalysisCard';
 
 type TimePeriod = '1D' | '5D' | '1M' | '6M' | 'YTD' | '1Y' | '5Y' | 'ALL';
 
@@ -1524,6 +1525,16 @@ export default function CompanyDetailPage() {
           </div>
         </div>
       )}
+
+      {/* AI Analysis — grounded narrative critique of the numeric valuation.
+          Sits above management goals and notes because it's the most
+          synthesised view of the company. */}
+      <div className="mb-6">
+        <CompanyAIAnalysisCard
+          companyId={companyId}
+          companyName={company.name}
+        />
+      </div>
 
       {/* Management Goals Section */}
       <GoalsSection companyId={companyId} />

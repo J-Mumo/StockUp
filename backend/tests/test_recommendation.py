@@ -387,3 +387,118 @@ class TestRecommendationOutput:
         assert "quality" in d
         assert "factors" in d["quality"]
         assert isinstance(d["quality"]["factors"], list)
+
+
+# ---------------------------------------------------------------------------
+# Test: Sector-conditioned quality thresholds
+# ---------------------------------------------------------------------------
+
+class TestSectorConditionedNorms:
+    """Verify that asset-heavy sectors don't get flagged by industrial norms.
+
+    KEGN-style example: ROE ~3-4%, D/E ~0.6, liabilities dwarf net income
+    but OCF is strong. Under industrial norms all three factors fail;
+    under energy/utility norms the debt check switches to Liab/OCF and
+    ROE hurdle drops to 10%.
+    """
+
+    def _kegn_like_financials(self) -> list[FinancialStatement]:
+        """A stylised KEGN — modest ROE, high absolute liabilities, strong OCF."""
+        rows = []
+        for i, year in enumerate(range(2021, 2026)):
+            fs = _make_fs(
+                fiscal_year=year,
+                return_on_equity=0.03 + 0.005 * i,  # 3–5% ROE
+                debt_to_equity=0.6,
+                net_income=6e9 * (1 + 0.15) ** i,
+                free_cash_flow=10e9 * (1 + 0.10) ** i,
+                dividends_per_share=0.3,
+                current_ratio=1.2,
+                revenue=50e9 * (1 + 0.05) ** i,
+                total_liabilities=250e9,  # ~42× NI, but only ~10× OCF
+            )
+            # OCF must be present for the OCF-based debt metric to fire.
+            fs.operating_cash_flow = 22e9 * (1 + 0.05) ** i
+            rows.append(fs)
+        return rows
+
+    def test_industrial_norms_flag_utility_style_company(self):
+        """Under default (industrial) thresholds a utility-shaped company fails."""
+        financials = self._kegn_like_financials()
+        quality = assess_quality(financials, sector=None)
+        # ROE, D/E and conservative-debt all fail under industrial norms.
+        assert quality.has_high_roe is False
+        assert quality.has_low_leverage is False
+        assert quality.has_conservative_debt is False
+
+    def test_energy_sector_uses_relaxed_roe(self):
+        """Energy sector: 10% ROE hurdle, but stylised KEGN still ~4% avg."""
+        financials = self._kegn_like_financials()
+        quality = assess_quality(financials, sector="Energy & Petroleum")
+        # 4% average still fails a 10% hurdle — that's the point, we're
+        # relaxing, not turning the check off.
+        assert quality.has_high_roe is False
+        # Detail string should reference the energy/utility label so the UI
+        # can explain *why* the threshold is what it is.
+        roe_factor = quality.factors[0]
+        assert "energy/utility" in roe_factor.detail
+
+    def test_energy_sector_debt_uses_ocf_metric(self):
+        """Energy sector: conservative-debt check switches to Liab/OCF and passes."""
+        financials = self._kegn_like_financials()
+        quality = assess_quality(financials, sector="Energy & Petroleum")
+        # 250B / ~22B OCF ≈ 11× → still above the 6× ceiling → fails, but
+        # under industrial (Liab/NI) it would be 42× vs 4× ceiling. The
+        # important test is that the metric changed.
+        debt_factor = quality.factors[8]
+        assert "OCF" in debt_factor.name
+        assert "Liab/OCF" in debt_factor.name
+
+    def test_energy_sector_debt_passes_with_healthy_ocf(self):
+        """When OCF/liabilities is genuinely healthy, energy sector debt passes."""
+        financials = self._kegn_like_financials()
+        # Bring liabilities down to 5× OCF (< 6× ceiling).
+        for fs in financials:
+            fs.total_liabilities = fs.operating_cash_flow * 5.0
+        quality = assess_quality(financials, sector="Energy & Petroleum")
+        debt_factor = quality.factors[8]
+        assert debt_factor.passed is True
+
+    def test_energy_sector_relaxes_de_ceiling(self):
+        """Energy sector: D/E ceiling widens from 0.5 to 1.2."""
+        financials = self._kegn_like_financials()
+        # 0.6 is > 0.5 (industrial fail) but < 1.2 (energy pass).
+        quality = assess_quality(financials, sector="Energy & Petroleum")
+        assert quality.has_low_leverage is True
+
+    def test_unknown_sector_falls_back_to_industrial(self):
+        """Unknown sector strings use the historical industrial defaults."""
+        financials = self._kegn_like_financials()
+        quality_unknown = assess_quality(financials, sector="Widgets Manufacturing")
+        quality_default = assess_quality(financials, sector=None)
+        assert quality_unknown.has_high_roe == quality_default.has_high_roe
+        assert quality_unknown.has_low_leverage == quality_default.has_low_leverage
+        assert quality_unknown.has_conservative_debt == quality_default.has_conservative_debt
+
+    def test_real_estate_sector_relaxes_thresholds(self):
+        """Real estate: 8% ROE hurdle, 1.5× D/E ceiling."""
+        financials = [
+            _make_fs(
+                fiscal_year=y,
+                return_on_equity=0.09,   # fails 15% but passes 8%
+                debt_to_equity=1.3,      # fails 0.5 but passes 1.5
+                net_income=2e9,
+                free_cash_flow=1.5e9,
+                dividends_per_share=1.0,
+                current_ratio=1.1,
+                revenue=6e9,
+                total_liabilities=15e9,
+            )
+            for y in range(2021, 2026)
+        ]
+        for fs in financials:
+            fs.operating_cash_flow = 2.5e9
+        quality = assess_quality(financials, sector="Real Estate")
+        assert quality.has_high_roe is True
+        assert quality.has_low_leverage is True
+

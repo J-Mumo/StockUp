@@ -24,6 +24,7 @@ import type {
   CompanyChatMessage,
   CompanyChatResponse,
   ChatHistoryResponse,
+  CompanyAIAnalysis,
   CompanyGoal,
   GoalScorecardRow,
 } from '../types';
@@ -168,6 +169,25 @@ export const companyChatApi = {
     api.post(`/stocks/companies/${companyId}/chat-history`, { messages }),
   getHistory: (companyId: number) =>
     api.get<ChatHistoryResponse>(`/stocks/companies/${companyId}/chat-history`),
+};
+
+// AI-generated per-company research narrative
+export const companyAIAnalysisApi = {
+  // Latest analysis, generating on-demand if inputs have changed. Safe to
+  // call on every company-detail page load — the backend fingerprint cache
+  // skips the LLM when nothing material has moved.
+  get: (companyId: number) =>
+    api.get<CompanyAIAnalysis>(`/stocks/companies/${companyId}/ai-analysis`),
+  // Force regeneration (bypasses cache, spends an LLM call).
+  refresh: (companyId: number) =>
+    api.post<CompanyAIAnalysis>(
+      `/stocks/companies/${companyId}/ai-analysis/refresh`,
+      { force: true }
+    ),
+  history: (companyId: number, limit = 10) =>
+    api.get<CompanyAIAnalysis[]>(
+      `/stocks/companies/${companyId}/ai-analysis/history?limit=${limit}`
+    ),
 };
 
 // Company Goals

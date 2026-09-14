@@ -96,6 +96,24 @@ def recalculate_single(self, company_id: int):
             f"[valuation_tasks] Valued company_id={company_id}: "
             f"IV={result.weighted_intrinsic_value}, MOS={result.margin_of_safety_pct}"
         )
+
+        # A fresh valuation may materially change the AI analysis's context
+        # (new DCF, new MOS, new recommendation). Enqueue an AI refresh —
+        # the AI task's fingerprint cache decides whether an actual LLM
+        # call is warranted, so this is safe to fire unconditionally.
+        try:
+            from tasks.ai_analysis_tasks import refresh_ai_analysis_single
+
+            refresh_ai_analysis_single.delay(
+                company_id=company_id, triggered_by="iv_change"
+            )
+        except Exception as ai_exc:  # noqa: BLE001 — best-effort trigger
+            logger.warning(
+                "[valuation_tasks] Failed to enqueue AI refresh for %s: %s",
+                company_id,
+                ai_exc,
+            )
+
         return {
             "status": "success",
             "company_id": company_id,

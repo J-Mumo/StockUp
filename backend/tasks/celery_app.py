@@ -35,6 +35,7 @@ celery_app = Celery(
         "tasks.price_tasks",
         "tasks.valuation_tasks",
         "tasks.alert_tasks",
+        "tasks.ai_analysis_tasks",
     ],
 )
 
@@ -99,5 +100,13 @@ celery_app.conf.beat_schedule = {
     "monthly-annual-report-parsing": {
         "task": "tasks.valuation_tasks.parse_annual_reports",
         "schedule": crontab(hour=0, minute=0, day_of_month="5"),  # 5th of month, 3AM EAT (00:00 UTC)
+    },
+    # AI analysis staleness sweep — runs after the daily valuation recalc
+    # so any material IV change gets picked up on the same evening. Honours
+    # the fingerprint cache so companies whose inputs haven't moved don't
+    # spend an LLM call.
+    "daily-ai-analysis-refresh": {
+        "task": "tasks.ai_analysis_tasks.refresh_stale_ai_analyses",
+        "schedule": crontab(hour=17, minute=0),  # 8PM EAT (17:00 UTC)
     },
 }

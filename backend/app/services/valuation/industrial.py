@@ -112,13 +112,22 @@ def calculate_dcf(
     )
     result.growth_rate_used = growth_rate
 
-    base_fcf = fcf_data[-1]
-    if base_fcf <= 0:
-        positive_fcfs = [f for f in fcf_data if f > 0]
-        if not positive_fcfs:
+    # Use a trailing 3-year mean of positive FCFs as the base rather than the
+    # last single year. A single-year anchor over-shoots dramatically when the
+    # most recent year is a peak (e.g. a one-off receivable release, an FX
+    # gain, or a working-capital swing) and under-shoots when it's a trough.
+    # Smoothing is a cheap, general improvement — not sector-specific.
+    lookback = min(3, len(fcf_data))
+    recent = fcf_data[-lookback:]
+    positive_recent = [f for f in recent if f > 0]
+    if positive_recent:
+        base_fcf = statistics.mean(positive_recent)
+    else:
+        positive_all = [f for f in fcf_data if f > 0]
+        if not positive_all:
             result.error = "All historical FCFs are negative or zero"
             return result
-        base_fcf = statistics.mean(positive_fcfs)
+        base_fcf = statistics.mean(positive_all)
 
     discount_rate = params["discount_rate"]
     terminal_growth = params["terminal_growth_rate"]

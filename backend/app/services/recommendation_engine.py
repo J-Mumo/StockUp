@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 
 from app.models.company import Company
 from app.models.financial_statement import FinancialStatement
+from app.services.valuation.sector_norms import QualityNorms, norms_for_sector
 from app.services.valuation.sectors import SectorKind, classify_sector
 
 logger = logging.getLogger(__name__)
@@ -226,11 +227,12 @@ def assess_quality(
     kind = classify_sector(sector)
     if kind == SectorKind.BANK:
         return _assess_bank_quality(financials)
-    return _assess_industrial_quality(financials)
+    return _assess_industrial_quality(financials, sector=sector)
 
 
 def _assess_industrial_quality(
     financials: list[FinancialStatement],
+    sector: str | None = None,
 ) -> QualityAssessment:
     """Assess quality factors from financial statements.
 
@@ -248,16 +250,20 @@ def _assess_industrial_quality(
     Returns:
         QualityAssessment with individual factor results.
     """
+    norms = norms_for_sector(sector)
+    # Keep the assessment tagged "industrial" so downstream slot mapping and
+    # UI rendering are unchanged; the sector-conditioned thresholds are an
+    # internal adjustment, not a new sector strategy.
     assessment = QualityAssessment(sector_kind="industrial")
     sorted_fs = sorted(financials, key=lambda f: f.fiscal_year)
 
-    # Factor 1: ROE > 15% consistent (average ROE over available years)
-    roe_factor = _assess_roe(sorted_fs)
+    # Factor 1: ROE consistency vs sector-appropriate hurdle.
+    roe_factor = _assess_roe(sorted_fs, norms=norms)
     assessment.factors.append(roe_factor)
     assessment.has_high_roe = roe_factor.passed
 
-    # Factor 2: D/E < 0.5 (latest year)
-    de_factor = _assess_debt_to_equity(sorted_fs)
+    # Factor 2: Leverage vs sector-appropriate ceiling.
+    de_factor = _assess_debt_to_equity(sorted_fs, norms=norms)
     assessment.factors.append(de_factor)
     assessment.has_low_leverage = de_factor.passed
 
@@ -291,8 +297,8 @@ def _assess_industrial_quality(
     assessment.factors.append(rev_factor)
     assessment.has_revenue_consistency = rev_factor.passed
 
-    # Factor 9: Conservative debt (total liabilities < 4x net income)
-    debt_factor = _assess_conservative_debt(sorted_fs)
+    # Factor 9: Conservative debt — sector-appropriate metric & threshold.
+    debt_factor = _assess_conservative_debt(sorted_fs, norms=norms)
     assessment.factors.append(debt_factor)
     assessment.has_conservative_debt = debt_factor.passed
 
@@ -306,8 +312,20 @@ def _assess_industrial_quality(
     return assessment
 
 
-def _assess_roe(financials: list[FinancialStatement]) -> QualityScore:
-    """ROE > 15% consistently (average across available years)."""
+def _assess_roe(
+    financials: list[FinancialStatement],
+    norms: QualityNorms | None = None,
+) -> QualityScore:
+    """Average ROE vs sector-appropriate hurdle.
+
+    Historical default is 15% (industrial). Utilities/energy/real-estate use
+    lower hurdles via :mod:`app.services.valuation.sector_norms`.
+    """
+    norms = norms or QualityNorms()
+    hurdle = norms.roe_min
+    name = f"Consistent ROE > {hurdle:.0%}"
+    threshold = f"> {hurdle:.2f} average, 50%+ years above threshold"
+
     roes = []
     for fs in financials:
         roe = _safe_float(fs.return_on_equity)
@@ -316,48 +334,58 @@ def _assess_roe(financials: list[FinancialStatement]) -> QualityScore:
 
     if not roes:
         return QualityScore(
-            name="Consistent ROE > 15%",
+            name=name,
             passed=False,
             value=None,
-            threshold="> 0.15 average",
+            threshold=threshold,
             detail="No ROE data available",
         )
 
     avg_roe = statistics.mean(roes)
-    # Check if at least 50% of years have ROE > 15%
-    years_above = sum(1 for r in roes if r > 0.15)
+    years_above = sum(1 for r in roes if r > hurdle)
     consistency = years_above / len(roes)
 
-    passed = avg_roe > 0.15 and consistency >= 0.5
+    passed = avg_roe > hurdle and consistency >= 0.5
+    detail = (
+        f"Avg ROE: {avg_roe:.1%}, {years_above}/{len(roes)} years above "
+        f"{hurdle:.0%} [{norms.label} hurdle]"
+    )
     return QualityScore(
-        name="Consistent ROE > 15%",
+        name=name,
         passed=passed,
         value=round(avg_roe, 4),
-        threshold="> 0.15 average, 50%+ years above threshold",
-        detail=f"Avg ROE: {avg_roe:.1%}, {years_above}/{len(roes)} years above 15%",
+        threshold=threshold,
+        detail=detail,
     )
 
 
-def _assess_debt_to_equity(financials: list[FinancialStatement]) -> QualityScore:
-    """D/E < 0.5 (latest available year)."""
-    # Use latest financial with D/E data
+def _assess_debt_to_equity(
+    financials: list[FinancialStatement],
+    norms: QualityNorms | None = None,
+) -> QualityScore:
+    """D/E vs sector-appropriate ceiling (latest available year)."""
+    norms = norms or QualityNorms()
+    ceiling = norms.de_max
+    name = f"Low Debt-to-Equity (< {ceiling:.1f})"
+    threshold = f"< {ceiling:.2f}"
+
     for fs in reversed(financials):
         de = _safe_float(fs.debt_to_equity)
         if de is not None:
-            passed = de < 0.5
+            passed = de < ceiling
             return QualityScore(
-                name="Low Debt-to-Equity (< 0.5)",
+                name=name,
                 passed=passed,
                 value=round(de, 4),
-                threshold="< 0.5",
-                detail=f"D/E ratio: {de:.2f} (FY{fs.fiscal_year})",
+                threshold=threshold,
+                detail=f"D/E ratio: {de:.2f} (FY{fs.fiscal_year}) [{norms.label} ceiling]",
             )
 
     return QualityScore(
-        name="Low Debt-to-Equity (< 0.5)",
+        name=name,
         passed=False,
         value=None,
-        threshold="< 0.5",
+        threshold=threshold,
         detail="No D/E data available",
     )
 
@@ -638,36 +666,71 @@ def _assess_revenue_consistency(financials: list[FinancialStatement]) -> Quality
     )
 
 
-def _assess_conservative_debt(financials: list[FinancialStatement]) -> QualityScore:
-    """Conservative debt: total liabilities < 4x net income (latest year)."""
-    for fs in reversed(financials):
-        ni = _safe_float(fs.net_income)
-        liabilities = _safe_float(fs.total_liabilities)
+def _assess_conservative_debt(
+    financials: list[FinancialStatement],
+    norms: QualityNorms | None = None,
+) -> QualityScore:
+    """Conservative debt vs sector-appropriate metric & threshold.
 
-        # Compute liabilities from assets - equity if not directly available
+    Historically this used ``liabilities / net income`` with a 4× ceiling —
+    fine for asset-light industrials, poor for utilities where NI is
+    distorted by non-cash FX losses on concessional foreign debt. Asset-heavy
+    sectors (energy, real estate, telecom) prefer ``liabilities / OCF`` when
+    OCF is available, falling back to a widened NI-based metric otherwise.
+    """
+    norms = norms or QualityNorms()
+
+    for fs in reversed(financials):
+        liabilities = _safe_float(fs.total_liabilities)
         if liabilities is None:
             assets = _safe_float(fs.total_assets)
             equity = _safe_float(fs.total_equity)
             if assets is not None and equity is not None:
                 liabilities = assets - equity
+        if liabilities is None:
+            continue
 
-        if ni is not None and ni > 0 and liabilities is not None:
+        # Preferred metric for asset-heavy sectors: liabilities / OCF.
+        if norms.prefer_ocf_debt_metric:
+            ocf = _safe_float(fs.operating_cash_flow)
+            if ocf is not None and ocf > 0:
+                ratio = liabilities / ocf
+                ceiling = norms.liab_to_ocf_max
+                passed = ratio < ceiling
+                return QualityScore(
+                    name=f"Conservative Debt (Liab/OCF < {ceiling:.0f}x)",
+                    passed=passed,
+                    value=round(ratio, 2),
+                    threshold=f"Total liabilities < {ceiling:.0f}\u00d7 OCF",
+                    detail=(
+                        f"Liabilities/OCF: {ratio:.1f}x (FY{fs.fiscal_year}) "
+                        f"[{norms.label} metric]"
+                    ),
+                )
+
+        # Fallback: liabilities / net income (widened per sector).
+        ni = _safe_float(fs.net_income)
+        if ni is not None and ni > 0:
             ratio = liabilities / ni
-            passed = ratio < 4.0
+            ceiling = norms.liab_to_ni_max
+            passed = ratio < ceiling
             return QualityScore(
-                name="Conservative Debt (LT Debt < 4x NI)",
+                name=f"Conservative Debt (Liab/NI < {ceiling:.0f}x)",
                 passed=passed,
                 value=round(ratio, 2),
-                threshold="Total liabilities < 4x net income",
-                detail=f"Liabilities/NI ratio: {ratio:.1f}x (FY{fs.fiscal_year})",
+                threshold=f"Total liabilities < {ceiling:.0f}\u00d7 net income",
+                detail=(
+                    f"Liabilities/NI ratio: {ratio:.1f}x (FY{fs.fiscal_year}) "
+                    f"[{norms.label} ceiling]"
+                ),
             )
 
     return QualityScore(
-        name="Conservative Debt (LT Debt < 4x NI)",
+        name="Conservative Debt",
         passed=False,
         value=None,
-        threshold="Total liabilities < 4x net income",
-        detail="Insufficient data (need net income > 0 and liabilities)",
+        threshold="Liabilities vs OCF/NI within sector norms",
+        detail="Insufficient data (need liabilities and positive OCF or NI)",
     )
 
 

@@ -536,10 +536,49 @@ class TestDCFAssumptionFields:
         ]
         result = calculate_dcf(financials, 100_000_000)
         assert result.error is None
-        assert result.base_fcf == pytest.approx(1_400_000_000)
+        # Base FCF is a trailing 3-year mean of positive FCFs (not the last
+        # single year) — 1.2B + 1.3B + 1.4B) / 3 = 1.3B.
+        assert result.base_fcf == pytest.approx(1_300_000_000)
         assert result.discount_rate == pytest.approx(DEFAULT_ASSUMPTIONS["discount_rate"])
         assert result.terminal_growth_rate == pytest.approx(DEFAULT_ASSUMPTIONS["terminal_growth_rate"])
         assert result.projection_years == DEFAULT_ASSUMPTIONS["projection_years"]
+
+    def test_dcf_base_fcf_smooths_out_peak_year(self):
+        """A single peak year shouldn't blow up the base FCF.
+
+        This is the KEGN-style pathology: 2025 FCF was ~2× the trailing
+        average, and the old ``base_fcf = fcf_data[-1]`` anchored on that
+        peak and projected it forward, producing an over-generous IV.
+        """
+        financials = [
+            _make_fs(2021, free_cash_flow=5_000_000_000),
+            _make_fs(2022, free_cash_flow=5_500_000_000),
+            _make_fs(2023, free_cash_flow=6_000_000_000),
+            _make_fs(2024, free_cash_flow=6_500_000_000),
+            _make_fs(2025, free_cash_flow=13_000_000_000),  # one-off peak
+        ]
+        result = calculate_dcf(financials, 100_000_000)
+        assert result.error is None
+        # Trailing 3-year mean of positive FCFs: (6.0 + 6.5 + 13.0)/3 = 8.5B.
+        # The old logic would have used 13.0B directly.
+        assert result.base_fcf == pytest.approx(8_500_000_000)
+        # Guard against regression: base must be strictly less than the
+        # peak year value.
+        assert result.base_fcf < 13_000_000_000
+
+    def test_dcf_base_fcf_falls_back_when_recent_all_negative(self):
+        """If the trailing 3 years are all non-positive, fall back to overall mean."""
+        financials = [
+            _make_fs(2021, free_cash_flow=8_000_000_000),
+            _make_fs(2022, free_cash_flow=6_000_000_000),
+            _make_fs(2023, free_cash_flow=-1_000_000_000),
+            _make_fs(2024, free_cash_flow=-500_000_000),
+            _make_fs(2025, free_cash_flow=-200_000_000),
+        ]
+        result = calculate_dcf(financials, 100_000_000)
+        assert result.error is None
+        # Positive-only mean: (8.0 + 6.0)/2 = 7.0B.
+        assert result.base_fcf == pytest.approx(7_000_000_000)
 
     def test_dcf_respects_custom_assumptions_in_result(self):
         financials = [_make_fs(y, free_cash_flow=5e9) for y in range(2020, 2026)]
