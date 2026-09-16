@@ -983,51 +983,82 @@ export default function CompanyDetailPage() {
                     </div>
                   )}
 
-                  {/* Bear / Base / Bull scenarios */}
-                  {valuation.scenario_values && Object.keys(valuation.scenario_values).length > 0 && (
-                    <div className="mb-4 pb-4 border-b border-dark-border">
-                      <p className="text-xs text-gray-400 mb-2 font-medium">
-                        📊 DCF Scenarios{' '}
-                        {calcDetails && (calcDetails.dcf as { growth_rate_used?: number })?.growth_rate_used != null && (
-                          <span className="text-gray-500 font-normal">
-                            (base FCF growth {((calcDetails.dcf as { growth_rate_used: number }).growth_rate_used * 100).toFixed(1)}%,
-                            bear/bull shift ±4pp)
-                          </span>
-                        )}
-                      </p>
-                      <div className="grid grid-cols-3 gap-3">
-                        {(['bear', 'base', 'bull'] as const).map((key) => {
-                          const iv = valuation.scenario_values?.[key];
-                          if (iv == null) return null;
-                          const price = valuation.current_market_price;
-                          const mos = price != null && iv > 0 ? 1 - price / iv : null;
-                          const color =
-                            key === 'bear' ? 'text-red-400 border-red-900/50' :
-                            key === 'bull' ? 'text-green-400 border-green-900/50' :
-                            'text-blue-400 border-blue-900/50';
-                          const mosColor =
-                            mos == null ? 'text-gray-500' :
-                            mos >= 0.2 ? 'text-green-400' :
-                            mos >= 0 ? 'text-yellow-400' :
-                            'text-red-400';
-                          return (
-                            <div key={key} className={`p-3 rounded-lg border ${color} bg-dark-surface/40`}>
-                              <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">{key}</p>
-                              <p className={`text-lg font-bold ${color.split(' ')[0]}`}>{fmtKES(iv)}</p>
-                              <p className="text-[10px] text-gray-500 mt-1">
-                                vs price {price != null ? fmtKES(price) : '—'}
-                              </p>
-                              {mos != null && (
-                                <p className={`text-xs mt-0.5 ${mosColor}`}>
-                                  MoS {(mos * 100).toFixed(0)}%
+                  {/* Bear / Base / Bull (industrial) or Conservative / Base / Strong (bank) scenarios.
+
+                       The valuation engine emits ``scenario_values`` with different keys
+                       depending on the sector strategy:
+
+                         * Industrial DCF → { bear, base, bull }
+                         * Bank residual-income → { conservative, base, strong }
+
+                       Detect the shape at runtime so bank users don't see an empty panel
+                       (which happened when this component only knew about bear/bull). */}
+                  {valuation.scenario_values && Object.keys(valuation.scenario_values).length > 0 && (() => {
+                    const scenarios = valuation.scenario_values!;
+                    const isBank = 'conservative' in scenarios || 'strong' in scenarios;
+                    const orderedKeys = isBank
+                      ? (['conservative', 'base', 'strong'] as const).filter((k) => scenarios[k] != null)
+                      : (['bear', 'base', 'bull'] as const).filter((k) => scenarios[k] != null);
+                    if (orderedKeys.length === 0) return null;
+
+                    // Title + subtitle wording differs per model. Banks don't use DCF, so
+                    // "DCF Scenarios" is misleading — say "Valuation Scenarios" and describe
+                    // what actually varies (ROE fade / cost-of-equity) instead of FCF growth.
+                    const title = isBank ? '📊 Valuation Scenarios' : '📊 DCF Scenarios';
+                    const growthRate = calcDetails && (calcDetails.dcf as { growth_rate_used?: number })?.growth_rate_used;
+                    const subtitle = isBank
+                      ? '(sustainable ROE + cost-of-equity fade; conservative/strong bracket the base case)'
+                      : growthRate != null
+                        ? `(base FCF growth ${(growthRate * 100).toFixed(1)}%, bear/bull shift ±4pp)`
+                        : null;
+
+                    const colorFor = (key: string): string => {
+                      // Lowest → red, base → blue, highest → green. Same visual mapping
+                      // whether the label is bear/bull or conservative/strong.
+                      if (key === 'bear' || key === 'conservative') return 'text-red-400 border-red-900/50';
+                      if (key === 'bull' || key === 'strong') return 'text-green-400 border-green-900/50';
+                      return 'text-blue-400 border-blue-900/50';
+                    };
+
+                    return (
+                      <div className="mb-4 pb-4 border-b border-dark-border">
+                        <p className="text-xs text-gray-400 mb-2 font-medium">
+                          {title}
+                          {subtitle && (
+                            <span className="text-gray-500 font-normal"> {subtitle}</span>
+                          )}
+                        </p>
+                        <div className="grid grid-cols-3 gap-3">
+                          {orderedKeys.map((key) => {
+                            const iv = scenarios[key];
+                            if (iv == null) return null;
+                            const price = valuation.current_market_price;
+                            const mos = price != null && iv > 0 ? 1 - price / iv : null;
+                            const color = colorFor(key);
+                            const mosColor =
+                              mos == null ? 'text-gray-500' :
+                              mos >= 0.2 ? 'text-green-400' :
+                              mos >= 0 ? 'text-yellow-400' :
+                              'text-red-400';
+                            return (
+                              <div key={key} className={`p-3 rounded-lg border ${color} bg-dark-surface/40`}>
+                                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">{key}</p>
+                                <p className={`text-lg font-bold ${color.split(' ')[0]}`}>{fmtKES(iv)}</p>
+                                <p className="text-[10px] text-gray-500 mt-1">
+                                  vs price {price != null ? fmtKES(price) : '—'}
                                 </p>
-                              )}
-                            </div>
-                          );
-                        })}
+                                {mos != null && (
+                                  <p className={`text-xs mt-0.5 ${mosColor}`}>
+                                    MoS {(mos * 100).toFixed(0)}%
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {/* Expected forward return per scenario --------------------
                       Converts each scenario's IV + growth into an

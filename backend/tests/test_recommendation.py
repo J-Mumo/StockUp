@@ -502,3 +502,101 @@ class TestSectorConditionedNorms:
         assert quality.has_high_roe is True
         assert quality.has_low_leverage is True
 
+
+# ---------------------------------------------------------------------------
+# Test: Bank recommendation gate uses bank-specific core factors
+# ---------------------------------------------------------------------------
+
+class TestBankRecommendationGate:
+    """Banks must be evaluated against bank-specific core factors.
+
+    Regression: the recommendation engine previously hardcoded the
+    industrial core-factor indices ``[6, 2, 8, 0, 9]`` for every sector.
+    Slot 8 for banks is deliberately marked ``insufficient_data`` ("n/a
+    for banks — customer deposits are raw material, not debt"), so
+    ``core_total`` capped at 4 and no bank could ever earn a Buy /
+    Strong Buy signal, only "Hold — quality gate incomplete".
+    """
+
+    def _bank_financials(
+        self,
+        roe: float = 0.20,
+        car: float = 0.18,
+        npl: float = 0.08,
+        cor: float = 0.01,
+        loan_growth: float = 0.12,
+        deposit_growth: float = 0.13,
+        cost_income: float = 0.50,
+        base_ni: float = 15e9,
+        growth: float = 0.12,
+        base_nii: float = 40e9,
+        dps: float = 2.0,
+        years: int = 5,
+    ) -> list[FinancialStatement]:
+        rows: list[FinancialStatement] = []
+        for i in range(years):
+            fs = _make_fs(
+                fiscal_year=2021 + i,
+                return_on_equity=roe,
+                net_income=base_ni * ((1 + growth) ** i),
+                dividends_per_share=dps,
+                revenue=base_nii * 1.4 * ((1 + growth) ** i),
+            )
+            fs.sector_metrics = {
+                "capital_adequacy_ratio": car,
+                "npl_ratio": npl,
+                "cost_of_risk": cor,
+                "loan_growth_pct": loan_growth,
+                "deposit_growth_pct": deposit_growth,
+                "cost_to_income_ratio": cost_income,
+                "net_interest_income": base_nii * ((1 + growth) ** i),
+            }
+            rows.append(fs)
+        return rows
+
+    def test_bank_with_strong_metrics_and_deep_mos_gets_buy(self):
+        """A well-capitalised, high-ROE bank at >30% MOS should reach Buy."""
+        financials = self._bank_financials()
+        rec = generate_recommendation(0.35, financials, sector="Banking")
+        assert rec.action in ("Buy", "Strong Buy"), (
+            f"Expected Buy/Strong Buy for strong bank at 35% MOS, "
+            f"got {rec.action}: {rec.reason}"
+        )
+        # Ensure the reason mentions core quality factors, not "cash flow data".
+        assert "cash flow data" not in rec.reason
+
+    def test_bank_with_strong_metrics_and_moderate_mos_gets_accumulate(self):
+        """Moderate MOS + >=4/5 bank core factors -> Accumulate."""
+        financials = self._bank_financials()
+        rec = generate_recommendation(0.20, financials, sector="Banking")
+        assert rec.action == "Accumulate", (
+            f"Expected Accumulate, got {rec.action}: {rec.reason}"
+        )
+
+    def test_bank_missing_sector_metrics_does_not_mention_cash_flow(self):
+        """When bank sector_metrics are missing the hint must be bank-appropriate."""
+        # Bank quality path with no sector_metrics: capital, asset quality,
+        # earning-asset growth all resolve as insufficient_data.
+        financials = [
+            _make_fs(
+                fiscal_year=2021 + i,
+                return_on_equity=0.20,
+                net_income=15e9 * (1.1 ** i),
+                dividends_per_share=2.0,
+                revenue=40e9 * (1.1 ** i),
+            )
+            for i in range(5)
+        ]
+        rec = generate_recommendation(0.35, financials, sector="Banking")
+        assert rec.action == "Hold"
+        assert "cash flow data" not in rec.reason
+        assert "sector metrics" in rec.reason.lower()
+
+    def test_bank_with_weak_asset_quality_fails_gate(self):
+        """A bank with high NPL/CoR should fail the asset-quality core factor."""
+        financials = self._bank_financials(npl=0.20, cor=0.035)
+        rec = generate_recommendation(0.35, financials, sector="Banking")
+        # Strong MOS but asset quality fails -> Hold with failing factors listed.
+        assert rec.action == "Hold"
+        assert "Asset Quality" in rec.reason or "asset quality" in rec.reason.lower()
+

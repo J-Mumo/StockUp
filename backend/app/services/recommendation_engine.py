@@ -95,6 +95,21 @@ _BANK_SUBSCORE_MAP: dict[str, list[int]] = {
     "Shareholder returns": [4],          # dividend consistency
 }
 
+# Core quality-gate factor indices, per sector. The recommendation engine
+# requires all five to pass for a Buy / Strong Buy signal. Slot semantics
+# differ per sector, so the industrial defaults (FCF-heavy) would silently
+# exclude every bank — slot 8 is n/a for banks, so ``core_total`` could
+# never reach 5 and no bank could ever earn a Buy. Route by sector instead.
+#
+# Industrial: FCF increasing (6), earnings growth (2), conservative debt (8),
+#             ROE (0), capital efficiency (9).
+# Bank:       ROE > 18% (0), capital adequacy (1), earnings growth (2),
+#             asset quality — NPL/CoR (3), earning-asset growth (6).
+_CORE_FACTOR_INDICES: dict[str, list[int]] = {
+    "industrial": [6, 2, 8, 0, 9],
+    "bank": [0, 1, 2, 3, 6],
+}
+
 
 @dataclass
 class QualityAssessment:
@@ -1083,9 +1098,20 @@ def generate_recommendation(
 
     mos_pct = margin_of_safety * 100
 
-    # Core factors: FCF increasing, earnings growth, conservative debt, ROE, capital efficiency.
-    # Indexes reference quality.factors order from assess_quality().
-    core_factor_indices = [6, 2, 8, 0, 9]
+    # Core factor indices are sector-specific: for banks the industrial FCF-
+    # oriented gate would leave slot 8 permanently n/a, capping core_total at
+    # 4 and preventing any bank from ever earning a Buy signal. See
+    # ``_CORE_FACTOR_INDICES`` for the per-sector slot list.
+    core_factor_indices = _CORE_FACTOR_INDICES.get(
+        quality.sector_kind, _CORE_FACTOR_INDICES["industrial"]
+    )
+    # Human-friendly hint for when core factors are unavailable — differs
+    # per sector so bank users don't see "cash flow data is needed".
+    missing_data_hint = (
+        "Additional sector metrics (capital, asset quality, growth) are needed."
+        if quality.sector_kind == "bank"
+        else "Additional cash flow data is needed."
+    )
     core_factors = [quality.factors[i] for i in core_factor_indices]
     available_core = [f for f in core_factors if not f.insufficient_data]
     core_passed = sum(1 for f in available_core if f.passed)
@@ -1122,7 +1148,7 @@ def generate_recommendation(
             if missing_core > 0:
                 reason = (
                     f"Undervalued ({mos_pct:.1f}% MOS) but quality gate is incomplete "
-                    f"({core_total}/5 core factors available). Additional cash flow data is needed."
+                    f"({core_total}/5 core factors available). {missing_data_hint}"
                 )
             else:
                 reason = (
@@ -1142,7 +1168,7 @@ def generate_recommendation(
             if missing_core > 0:
                 reason = (
                     f"Marginally undervalued: {mos_pct:.1f}% margin of safety, "
-                    f"but only {core_total}/5 core quality factors are available."
+                    f"but only {core_total}/5 core quality factors are available. {missing_data_hint}"
                 )
             else:
                 reason = (
