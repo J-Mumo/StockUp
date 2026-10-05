@@ -26,6 +26,10 @@ class User(Base):
     alerts = relationship("Alert", back_populates="user", cascade="all, delete-orphan")
     watchlists = relationship("Watchlist", back_populates="user", cascade="all, delete-orphan")
     analysis_snapshots = relationship("AnalysisSnapshot", back_populates="user", cascade="all, delete-orphan")
+    notification_preference = relationship(
+        "NotificationPreference", back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
+    notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
     entered_financials = relationship("FinancialStatement", back_populates="entered_by")
 
     def __repr__(self) -> str:

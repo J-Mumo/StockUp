@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import auth, stocks, alerts, analysis, portfolio, watchlists, dashboard, notes, company_chat, company_ai_analysis, goals, internal
+from app.routers import auth, stocks, alerts, analysis, portfolio, watchlists, dashboard, notes, company_chat, company_ai_analysis, goals, internal, notifications
 
 settings = get_settings()
 
@@ -49,6 +49,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(stocks.router)
 app.include_router(alerts.router)
+app.include_router(notifications.router)
 app.include_router(analysis.router)
 app.include_router(portfolio.router)
 app.include_router(watchlists.router)

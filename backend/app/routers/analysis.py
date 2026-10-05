@@ -127,8 +127,24 @@ def compute_valuation(
     db.commit()
 
     # Check and trigger alerts
-    check_and_trigger_alerts(db, company_id)
+    triggered_alerts = check_and_trigger_alerts(db, company_id)
     db.commit()
+
+    # Alert rules are one-shot. If this on-demand computation triggers one,
+    # enqueue its email now; the scheduled evaluator will no longer see it as
+    # active/untriggered on its next pass.
+    if triggered_alerts:
+        from app.models.notification import Notification
+        from tasks.alert_tasks import send_notification_email
+
+        notification_ids = [
+            row[0]
+            for row in db.query(Notification.id)
+            .filter(Notification.alert_id.in_([alert.id for alert in triggered_alerts]))
+            .all()
+        ]
+        for notification_id in notification_ids:
+            send_notification_email.delay(notification_id)
 
     # Return the valuation response
     if latest_iv:

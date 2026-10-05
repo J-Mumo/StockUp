@@ -280,14 +280,41 @@ export interface Alert {
   id: number;
   user_id: number;
   company_id: number;
-  alert_type: 'price_above' | 'price_below' | 'valuation_change' | 'margin_of_safety';
-  threshold: number;
+  alert_type: 'price_above' | 'price_below' | 'margin_of_safety' | 'custom';
+  condition: string;
+  threshold_value: number;
+  is_active: boolean;
   message: string | null;
   is_triggered: boolean;
   is_read: boolean;
   triggered_at: string | null;
   created_at: string;
   company?: Company;
+}
+
+export interface Notification {
+  id: number;
+  company_id: number | null;
+  alert_id: number | null;
+  notification_type: string;
+  priority: 'low' | 'normal' | 'high' | 'critical';
+  title: string;
+  body: string;
+  link_path: string | null;
+  payload: Record<string, unknown> | null;
+  read_at: string | null;
+  email_status: 'pending' | 'sent' | 'failed' | 'suppressed' | 'skipped' | 'queued_digest';
+  email_sent_at: string | null;
+  created_at: string;
+}
+
+export interface NotificationPreferences {
+  in_app_enabled: boolean;
+  email_enabled: boolean;
+  email_frequency: 'immediate' | 'daily_digest' | 'off';
+  price_alerts_enabled: boolean;
+  valuation_alerts_enabled: boolean;
+  recommendation_alerts_enabled: boolean;
 }
 
 export interface Watchlist {

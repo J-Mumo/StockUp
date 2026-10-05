@@ -14,6 +14,7 @@ from app.models.company_ai_analysis import CompanyAIAnalysis
 from app.models.company_note import CompanyNote
 from app.models.company_chat import CompanyChat
 from app.models.company_goal import CompanyGoal, CompanyGoalProgress
+from app.models.notification import Notification, NotificationPreference
 
 __all__ = [
     "Market",
@@ -33,4 +34,6 @@ __all__ = [
     "CompanyChat",
     "CompanyGoal",
     "CompanyGoalProgress",
+    "Notification",
+    "NotificationPreference",
 ]

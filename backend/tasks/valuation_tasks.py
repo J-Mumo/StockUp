@@ -29,7 +29,14 @@ def recalculate_all_valuations(self):
 
     Runs after the daily price fetch so that MOS reflects current prices.
     """
+    from sqlalchemy import desc
+
     from app.database import SessionLocal
+    from app.models.company import Company
+    from app.models.financial_statement import FinancialStatement
+    from app.models.intrinsic_value import IntrinsicValue
+    from app.services import recommendation_engine
+    from app.services.notification_service import create_recommendation_change_notifications
     from app.services.valuation_engine import compute_all_valuations
 
     started_at = datetime.utcnow()
@@ -37,7 +44,62 @@ def recalculate_all_valuations(self):
 
     db = SessionLocal()
     try:
+        active_companies = db.query(Company).filter(Company.is_active == True).all()  # noqa: E712
+        previous_actions = {
+            company.id: (
+                db.query(IntrinsicValue.recommendation)
+                .filter(IntrinsicValue.company_id == company.id)
+                .order_by(desc(IntrinsicValue.valuation_date), desc(IntrinsicValue.id))
+                .scalar()
+            )
+            for company in active_companies
+        }
         results = compute_all_valuations(db)
+
+        # Persist the same recommendation users see in the detail endpoint.
+        # This also lets a fresh daily IV snapshot replace the old row without
+        # leaving dashboard recommendation columns blank.
+        notification_ids: list[int] = []
+        for company in active_companies:
+            result = results.get(company.id)
+            if isinstance(result, str) or result is None:
+                continue
+            current_iv = (
+                db.query(IntrinsicValue)
+                .filter(IntrinsicValue.company_id == company.id)
+                .order_by(desc(IntrinsicValue.valuation_date), desc(IntrinsicValue.id))
+                .first()
+            )
+            if current_iv is None:
+                continue
+            financials = (
+                db.query(FinancialStatement)
+                .filter(FinancialStatement.company_id == company.id)
+                .order_by(FinancialStatement.fiscal_year)
+                .all()
+            )
+            recommendation = recommendation_engine.generate_recommendation(
+                result.margin_of_safety_pct, financials, sector=company.sector,
+            )
+            old_action = previous_actions.get(company.id)
+            current_iv.recommendation = recommendation.action
+            current_iv.recommendation_reason = recommendation.reason
+            if old_action and old_action != recommendation.action:
+                created = create_recommendation_change_notifications(
+                    db,
+                    company,
+                    previous_action=old_action,
+                    new_action=recommendation.action,
+                    valuation_id=current_iv.id,
+                )
+                notification_ids.extend(notification.id for notification in created)
+
+        db.commit()
+        if notification_ids:
+            from tasks.alert_tasks import send_notification_email
+
+            for notification_id in notification_ids:
+                send_notification_email.delay(notification_id)
 
         # Tally outcomes
         successes = sum(1 for r in results.values() if not isinstance(r, str))

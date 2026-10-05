@@ -46,6 +46,19 @@ class Settings(BaseSettings):
     # Leave blank to disable the /api/internal/* endpoints entirely.
     internal_api_token: str = ""
 
+    # Email notifications. Email is always addressed to the account's
+    # registered ``users.email``; no separate destination address is stored.
+    # Leave SMTP_HOST blank to keep delivery disabled while still retaining
+    # in-app notifications and delivery audit records.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_from_name: str = "StockUp"
+    smtp_use_tls: bool = True
+    public_app_url: str = "https://stockup.jmumo.com"
+
     # AI Financial Enrichment
     ai_provider: str = "openai"  # "openai" or "anthropic"
     openai_api_key: str = ""

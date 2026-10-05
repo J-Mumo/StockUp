@@ -9,6 +9,7 @@ from datetime import date, datetime
 from app.models.alert import Alert
 from app.models.company import Company
 from app.models.intrinsic_value import IntrinsicValue
+from app.models.notification import Notification
 from app.models.price_history import PriceHistory
 from app.routers.alerts import check_and_trigger_alerts
 
@@ -248,6 +249,29 @@ class TestAlertTriggering:
         assert triggered[0].is_triggered is True
         assert triggered[0].triggered_at is not None
         assert "35.0%" in triggered[0].message
+        notification = db.query(Notification).filter(Notification.alert_id == alert.id).one()
+        assert notification.user_id == user.id
+        assert notification.notification_type == "mos_target"
+        assert "Margin of safety" in notification.title
+
+    def test_trigger_is_notification_idempotent(self, db, user, company):
+        """Repeated evaluator calls must not create duplicate inbox events."""
+        alert = Alert(
+            user_id=user.id, company_id=company.id, alert_type="price_below",
+            condition="price_below_40", threshold_value=40.0,
+        )
+        db.add_all([
+            alert,
+            PriceHistory(
+                company_id=company.id, price_date=date(2026, 5, 1), close_price=38.0,
+                volume=100, source="test", fetched_at=datetime.utcnow(),
+            ),
+        ])
+        db.flush()
+        check_and_trigger_alerts(db, company.id)
+        # The rule is no longer untriggered on the second pass.
+        check_and_trigger_alerts(db, company.id)
+        assert db.query(Notification).filter(Notification.alert_id == alert.id).count() == 1
 
     def test_no_trigger_below_threshold(self, db, user, company):
         """MOS alert does NOT trigger when below threshold."""

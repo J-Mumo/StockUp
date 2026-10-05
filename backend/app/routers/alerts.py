@@ -20,6 +20,7 @@ from app.models.intrinsic_value import IntrinsicValue
 from app.models.price_history import PriceHistory
 from app.models.user import User
 from app.schemas.analysis import AlertCreate, AlertResponse, AlertUpdate
+from app.services.notification_service import create_alert_notification
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
@@ -217,6 +218,9 @@ def check_and_trigger_alerts(db: Session, company_id: int) -> list[Alert]:
             alert.is_triggered = True
             alert.triggered_at = datetime.utcnow()
             alert.message = message
+            company = db.query(Company).filter(Company.id == company_id).first()
+            if company is not None:
+                create_alert_notification(db, alert, company)
             triggered.append(alert)
 
     if triggered:

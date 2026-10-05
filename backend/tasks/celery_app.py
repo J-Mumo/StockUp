@@ -93,6 +93,14 @@ celery_app.conf.beat_schedule = {
         "task": "tasks.alert_tasks.evaluate_all_alerts",
         "schedule": crontab(hour=16, minute=30),  # 7:30PM EAT
     },
+    "notification-email-retry": {
+        "task": "tasks.alert_tasks.retry_pending_notification_emails",
+        "schedule": crontab(hour="*/2", minute=0),
+    },
+    "daily-notification-digest": {
+        "task": "tasks.alert_tasks.send_daily_notification_digests",
+        "schedule": crontab(hour=17, minute=0),  # 8PM EAT, after alert evaluation
+    },
     "monthly-financials-refresh": {
         "task": "tasks.valuation_tasks.refresh_all_financials",
         "schedule": crontab(hour=23, minute=0, day_of_month="1"),  # 1st of month, 2AM EAT (23:00 UTC prev day)

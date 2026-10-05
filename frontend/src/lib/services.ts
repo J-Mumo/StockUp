@@ -27,6 +27,8 @@ import type {
   CompanyAIAnalysis,
   CompanyGoal,
   GoalScorecardRow,
+  Notification,
+  NotificationPreferences,
 } from '../types';
 
 // Auth
@@ -120,13 +122,25 @@ export const alertsApi = {
   create: (data: {
     company_id: number;
     alert_type: string;
-    threshold: number;
-    message?: string;
+    condition: string;
+    threshold_value: number;
   }) => api.post<Alert>('/alerts', data),
   update: (id: number, data: Partial<Alert>) =>
     api.put<Alert>(`/alerts/${id}`, data),
   delete: (id: number) => api.delete(`/alerts/${id}`),
   markRead: (id: number) => api.post(`/alerts/${id}/mark-read`),
+};
+
+export const notificationsApi = {
+  list: (unreadOnly = false) =>
+    api.get<{ notifications: Notification[]; unread_count: number }>('/notifications', {
+      params: { unread_only: unreadOnly },
+    }),
+  markRead: (id: number) => api.post<Notification>(`/notifications/${id}/mark-read`),
+  markAllRead: () => api.post<{ marked_read: number }>('/notifications/mark-all-read'),
+  getPreferences: () => api.get<NotificationPreferences>('/notifications/preferences'),
+  updatePreferences: (data: Partial<NotificationPreferences>) =>
+    api.put<NotificationPreferences>('/notifications/preferences', data),
 };
 
 // Watchlists
