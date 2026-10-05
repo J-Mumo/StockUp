@@ -63,7 +63,12 @@ def _load_env() -> tuple[str, str]:
     return api_base, token
 
 
-def _list_companies(api_base: str, token: str, ticker: Optional[str]) -> list[dict]:
+def _list_companies(
+    api_base: str,
+    token: str,
+    ticker: Optional[str],
+    skip_tickers: set[str] | None = None,
+) -> list[dict]:
     resp = requests.get(
         f"{api_base}/api/internal/companies-with-ms-url",
         headers={"X-Internal-Token": token},
@@ -73,6 +78,8 @@ def _list_companies(api_base: str, token: str, ticker: Optional[str]) -> list[di
     items = resp.json()
     if ticker:
         items = [c for c in items if c["ticker"].upper() == ticker.upper()]
+    if skip_tickers:
+        items = [c for c in items if c["ticker"].upper() not in skip_tickers]
     return items
 
 
@@ -118,18 +125,29 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Local Marketscreener price updater")
     parser.add_argument("--days", type=int, default=14, help="Trailing window in days (0 = full history)")
     parser.add_argument("--ticker", help="Only process this single ticker (case-insensitive)")
+    parser.add_argument(
+        "--skip-tickers",
+        help="Comma-separated tickers to skip (useful after priority runs)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Fetch and log, but don't POST")
     parser.add_argument("--sleep", type=float, default=2.0, help="Seconds between companies (be polite)")
     args = parser.parse_args()
 
     api_base, token = _load_env()
     _log(f"API base: {api_base}")
+    skip_tickers = {
+        ticker.strip().upper()
+        for ticker in (args.skip_tickers or "").split(",")
+        if ticker.strip()
+    }
 
     try:
-        companies = _list_companies(api_base, token, args.ticker)
+        companies = _list_companies(api_base, token, args.ticker, skip_tickers)
     except requests.RequestException as e:
         _log(f"ERROR fetching company list: {e}")
         return 1
+    if skip_tickers:
+        _log(f"Skipping: {', '.join(sorted(skip_tickers))}")
     _log(f"Companies to process: {len(companies)}")
 
     stats = {"fetched": 0, "no_candles": 0, "posted": 0, "upserted": 0, "failed": 0}
