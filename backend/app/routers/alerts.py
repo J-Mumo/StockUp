@@ -6,7 +6,7 @@ Alerts are triggered when valuations are recalculated.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import desc
@@ -152,13 +152,13 @@ def check_and_trigger_alerts(db: Session, company_id: int) -> list[Alert]:
 
     Returns list of newly triggered alerts.
     """
-    # Get active alerts for this company
+    # Include triggered alerts so reversal can re-arm them. The one-shot
+    # state is retained while the condition remains true.
     active_alerts = (
         db.query(Alert)
         .filter(
             Alert.company_id == company_id,
             Alert.is_active == True,
-            Alert.is_triggered == False,
         )
         .all()
     )
@@ -185,6 +185,24 @@ def check_and_trigger_alerts(db: Session, company_id: int) -> list[Alert]:
     triggered: list[Alert] = []
 
     for alert in active_alerts:
+        if alert.is_triggered:
+            # Require both a 24h cooldown and a meaningful reversal before
+            # the same threshold can fire again. MOS reset uses a 5pp band;
+            # price reset uses 5% of the target to ignore threshold noise.
+            if alert.triggered_at and datetime.utcnow() - alert.triggered_at < timedelta(hours=24):
+                continue
+            threshold = float(alert.threshold_value)
+            reset = False
+            if alert.alert_type == "margin_of_safety" and latest_val and latest_val.margin_of_safety_pct is not None:
+                reset = float(latest_val.margin_of_safety_pct) * 100 < threshold - 5
+            elif alert.alert_type == "price_below" and latest_price:
+                reset = float(latest_price.close_price) > threshold * 1.05
+            elif alert.alert_type == "price_above" and latest_price:
+                reset = float(latest_price.close_price) < threshold * 0.95
+            if reset:
+                alert.is_triggered = False
+                alert.is_read = False
+            continue
         should_trigger = False
         message = ""
 

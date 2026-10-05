@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import logging
 import smtplib
-from datetime import datetime
+from datetime import datetime, time, timezone
 from email.message import EmailMessage
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
@@ -42,6 +43,8 @@ def get_or_create_preferences(db: Session, user_id: int) -> NotificationPreferen
 
 
 def _category_enabled(preference: NotificationPreference, notification_type: str) -> bool:
+    if notification_type == "strong_buy_opportunity":
+        return preference.opportunity_alerts_enabled
     if notification_type.startswith("price_"):
         return preference.price_alerts_enabled
     if notification_type.startswith("mos_") or notification_type.startswith("valuation_"):
@@ -70,7 +73,12 @@ def create_alert_notification(
     if not _category_enabled(preference, notification_type):
         return None
 
-    dedupe_key = f"alert:{alert.id}"
+    base_key = f"alert:{alert.id}"
+    prior_event = db.query(Notification.id).filter(Notification.dedupe_key == base_key).first()
+    dedupe_key = (
+        f"{base_key}:{alert.triggered_at.isoformat()}"
+        if prior_event and alert.triggered_at else base_key
+    )
     existing = db.query(Notification).filter(Notification.dedupe_key == dedupe_key).first()
     if existing is not None:
         return existing
@@ -89,7 +97,7 @@ def create_alert_notification(
         priority="high" if notification_type == "mos_target" else "normal",
         title=title,
         body=alert.message or f"Your {alert.alert_type.replace('_', ' ')} alert triggered.",
-        link_path=f"/stocks/{company.id}",
+        link_path=f"/companies/{company.id}",
         payload={
             "ticker": company.ticker_symbol,
             "alert_type": alert.alert_type,
@@ -142,7 +150,7 @@ def create_recommendation_change_notifications(
                 f"StockUp's recommendation changed from {previous_action} to {new_action} "
                 "after the latest valuation update."
             ),
-            link_path=f"/stocks/{company.id}",
+            link_path=f"/companies/{company.id}",
             payload={"previous_action": previous_action, "new_action": new_action},
             dedupe_key=dedupe_key,
             email_status="pending",
@@ -162,6 +170,7 @@ def create_strong_buy_opportunity_notifications(
     quality: Any,
     previous_action: str | None,
     new_action: str,
+    bank_metrics: dict | None = None,
 ) -> list[Notification]:
     """Notify opted-in users when an unowned company enters Strong Buy.
 
@@ -170,14 +179,23 @@ def create_strong_buy_opportunity_notifications(
     and (for banks) passing asset quality. Positive net transaction quantity
     excludes companies already held by the user.
     """
-    if new_action != "Strong Buy" or previous_action == "Strong Buy" or margin_of_safety < 0.20:
+    if new_action != "Strong Buy" or previous_action is None or previous_action == "Strong Buy" or margin_of_safety < 0.20:
         return []
     core_indices = [0, 1, 2, 3, 6] if quality.sector_kind == "bank" else [6, 2, 8, 0, 9]
     core_factors = [quality.factors[index] for index in core_indices]
     if any(f.insufficient_data or not f.passed for f in core_factors):
         return []
-    if quality.sector_kind == "bank" and not quality.factors[3].passed:
-        return []
+    if quality.sector_kind == "bank":
+        # The bank quality factor tolerates a missing NPL *or* CoR. Discovery
+        # emails need both current metrics to rule out a severe credit warning.
+        metrics = bank_metrics or {}
+        try:
+            npl = float(metrics["npl_ratio"])
+            cor = float(metrics["cost_of_risk"])
+        except (KeyError, TypeError, ValueError):
+            return []
+        if not (0 <= npl < 0.15 and 0 <= cor < 0.02):
+            return []
 
     users = (
         db.query(User)
@@ -190,6 +208,12 @@ def create_strong_buy_opportunity_notifications(
     )
     created: list[Notification] = []
     for user in users:
+        if db.query(Notification.id).filter(
+            Notification.dedupe_key == f"recommendation:{valuation_id}:{user.id}",
+        ).first():
+            # This user already receives a watchlist recommendation-change
+            # notification for the same transition; do not send both.
+            continue
         held_quantity = (
             db.query(func.coalesce(func.sum(
                 case(
@@ -203,8 +227,15 @@ def create_strong_buy_opportunity_notifications(
         )
         if float(held_quantity or 0) > 0:
             continue
-        dedupe_key = f"opportunity:strong-buy:{valuation_id}:{user.id}"
-        if db.query(Notification.id).filter(Notification.dedupe_key == dedupe_key).first():
+        # The opportunity is one-time per user/company, even if the stock
+        # exits and re-enters Strong Buy on a subsequent day. Also recognize
+        # events written by the old valuation-id-based key.
+        dedupe_key = f"opportunity:strong-buy:{company.id}:{user.id}"
+        if db.query(Notification.id).filter(
+            Notification.user_id == user.id,
+            Notification.company_id == company.id,
+            Notification.notification_type == "strong_buy_opportunity",
+        ).first():
             continue
         notification = Notification(
             user_id=user.id,
@@ -216,10 +247,10 @@ def create_strong_buy_opportunity_notifications(
                 f"{company.name} entered Strong Buy with a {margin_of_safety:.0%} margin of safety. "
                 "You do not currently hold this company."
             ),
-            link_path=f"/stocks/{company.id}",
-            payload={"action": new_action, "margin_of_safety": margin_of_safety},
+            link_path=f"/companies/{company.id}",
+            payload={"action": new_action, "margin_of_safety": margin_of_safety, "valuation_id": valuation_id},
             dedupe_key=dedupe_key,
-            email_status="pending",
+            email_status="queued_digest",
         )
         db.add(notification)
         db.flush()
@@ -240,6 +271,12 @@ def deliver_notification_email(db: Session, notification_id: int) -> str:
         return "missing"
     if notification.email_status == "sent":
         return "already_sent"
+    if notification.notification_type == "strong_buy_opportunity":
+        # Even a delayed Celery retry must not turn this into a standalone
+        # email. Opportunities are bundled in the daily digest.
+        notification.email_status = "queued_digest"
+        db.commit()
+        return "queued_digest"
 
     user = db.get(User, notification.user_id)
     if user is None or not user.is_active:
@@ -296,11 +333,15 @@ def deliver_notification_email(db: Session, notification_id: int) -> str:
 
 
 def deliver_daily_digests(db: Session) -> dict[str, int]:
-    """Send one grouped email per user for queued daily-digest notifications."""
+    """Send at most one email per user for queued digest items each run."""
     settings = get_settings()
     queued = (
         db.query(Notification)
-        .filter(Notification.email_status == "queued_digest")
+        .filter(
+            (Notification.email_status == "queued_digest")
+            | ((Notification.notification_type == "strong_buy_opportunity")
+               & Notification.email_status.in_(("pending", "failed")))
+        )
         .order_by(Notification.user_id, Notification.created_at)
         .all()
     )
@@ -312,42 +353,68 @@ def deliver_daily_digests(db: Session) -> dict[str, int]:
         grouped.setdefault(notification.user_id, []).append(notification)
 
     sent = skipped = 0
+    eat_today = datetime.now(ZoneInfo("Africa/Nairobi")).date()
+    eat_midnight = datetime.combine(eat_today, time.min, tzinfo=ZoneInfo("Africa/Nairobi"))
+    today_start_utc = eat_midnight.astimezone(timezone.utc).replace(tzinfo=None)
     for user_id, notifications in grouped.items():
         user = db.get(User, user_id)
         preference = get_or_create_preferences(db, user_id)
-        if user is None or not user.is_active or not preference.email_enabled:
+        if user is None or not user.is_active or not preference.email_enabled or preference.email_frequency == "off":
             for notification in notifications:
                 notification.email_status = "suppressed"
                 notification.email_error = "user unavailable or email disabled"
             skipped += len(notifications)
             continue
+        opportunity_sent_today = db.query(Notification.id).filter(
+            Notification.user_id == user_id,
+            Notification.notification_type == "strong_buy_opportunity",
+            Notification.email_status == "sent",
+            Notification.email_sent_at >= today_start_utc,
+        ).first() is not None
+        eligible: list[Notification] = []
+        for notification in notifications:
+            if not _category_enabled(preference, notification.notification_type):
+                notification.email_status = "suppressed"
+                notification.email_error = "disabled by notification preference"
+                skipped += 1
+            elif notification.notification_type != "strong_buy_opportunity" and preference.email_frequency != "daily_digest":
+                # Respect changes to frequency made after the event was queued.
+                notification.email_status = "pending"
+            elif notification.notification_type == "strong_buy_opportunity" and opportunity_sent_today:
+                # Leave this event queued for tomorrow's digest rather than
+                # sending a second discovery email on the same day.
+                notification.email_status = "queued_digest"
+            else:
+                eligible.append(notification)
+        if not eligible:
+            continue
         if not settings.smtp_host or not settings.smtp_from_email:
-            for notification in notifications:
+            for notification in eligible:
                 notification.email_status = "skipped"
                 notification.email_error = "SMTP is not configured"
-            skipped += len(notifications)
+            skipped += len(eligible)
             continue
 
-        lines = [f"- {n.title}: {n.body}" for n in notifications]
+        lines = [f"- {n.title}: {n.body}" for n in eligible]
         message = _build_email(
             to_email=user.email,
-            subject=f"Your daily StockUp digest ({len(notifications)})",
+            subject=f"Your daily StockUp digest ({len(eligible)})",
             body="Here are your queued StockUp notifications:\n\n" + "\n".join(lines)
             + f"\n\nView your notification inbox: {settings.public_app_url.rstrip('/')}/alerts",
         )
         try:
             _send_smtp_message(message)
             now = datetime.utcnow()
-            for notification in notifications:
+            for notification in eligible:
                 notification.email_status = "sent"
                 notification.email_attempted_at = now
                 notification.email_sent_at = now
                 notification.email_error = None
-            sent += len(notifications)
+            sent += len(eligible)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Failed to send daily notification digest to user_id=%s", user_id)
-            for notification in notifications:
-                notification.email_status = "failed"
+            for notification in eligible:
+                notification.email_status = "queued_digest"  # retry as a group tomorrow
                 notification.email_error = str(exc)[:1000]
                 notification.email_attempted_at = datetime.utcnow()
     db.commit()

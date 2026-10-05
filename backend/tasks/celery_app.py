@@ -68,10 +68,8 @@ celery_app.conf.update(
 
 # ---------------------------------------------------------------------------
 # Celery Beat Schedule (Step 43)
-# Daily schedule in EAT (UTC+3):
-#   6PM EAT = 15:00 UTC — fetch prices
-#   7PM EAT = 16:00 UTC — recalculate valuations
-#   7:30PM EAT = 16:30 UTC — evaluate alerts
+# Celery crontab uses the configured Africa/Nairobi timezone: hour values
+# below are LOCAL EAT hours, not UTC. The price fetch is currently disabled.
 # ---------------------------------------------------------------------------
 
 celery_app.conf.beat_schedule = {
@@ -83,15 +81,15 @@ celery_app.conf.beat_schedule = {
     # Re-enable this block if/when a working server-side source is added.
     # "daily-price-fetch": {
     #     "task": "tasks.price_tasks.fetch_all_prices",
-    #     "schedule": crontab(hour=15, minute=0),  # 6PM EAT
+    #     "schedule": crontab(hour=18, minute=0),  # 6PM EAT
     # },
     "daily-valuation-recalc": {
         "task": "tasks.valuation_tasks.recalculate_all_valuations",
-        "schedule": crontab(hour=16, minute=0),  # 7PM EAT
+        "schedule": crontab(hour=19, minute=0),  # 7PM EAT
     },
     "daily-alert-evaluation": {
         "task": "tasks.alert_tasks.evaluate_all_alerts",
-        "schedule": crontab(hour=16, minute=30),  # 7:30PM EAT
+        "schedule": crontab(hour=19, minute=30),  # 7:30PM EAT
     },
     "notification-email-retry": {
         "task": "tasks.alert_tasks.retry_pending_notification_emails",
@@ -99,15 +97,15 @@ celery_app.conf.beat_schedule = {
     },
     "daily-notification-digest": {
         "task": "tasks.alert_tasks.send_daily_notification_digests",
-        "schedule": crontab(hour=17, minute=0),  # 8PM EAT, after alert evaluation
+        "schedule": crontab(hour=20, minute=0),  # 8PM EAT, after alert evaluation
     },
     "monthly-financials-refresh": {
         "task": "tasks.valuation_tasks.refresh_all_financials",
-        "schedule": crontab(hour=23, minute=0, day_of_month="1"),  # 1st of month, 2AM EAT (23:00 UTC prev day)
+        "schedule": crontab(hour=2, minute=0, day_of_month="1"),  # 1st of month, 2AM EAT
     },
     "monthly-annual-report-parsing": {
         "task": "tasks.valuation_tasks.parse_annual_reports",
-        "schedule": crontab(hour=0, minute=0, day_of_month="5"),  # 5th of month, 3AM EAT (00:00 UTC)
+        "schedule": crontab(hour=3, minute=0, day_of_month="5"),  # 5th of month, 3AM EAT
     },
     # AI analysis staleness sweep — runs after the daily valuation recalc
     # so any material IV change gets picked up on the same evening. Honours
@@ -115,6 +113,6 @@ celery_app.conf.beat_schedule = {
     # spend an LLM call.
     "daily-ai-analysis-refresh": {
         "task": "tasks.ai_analysis_tasks.refresh_stale_ai_analyses",
-        "schedule": crontab(hour=17, minute=0),  # 8PM EAT (17:00 UTC)
+        "schedule": crontab(hour=20, minute=0),  # 8PM EAT
     },
 }

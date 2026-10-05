@@ -4,7 +4,7 @@ Tests the alerts API endpoints and the check_and_trigger_alerts function.
 """
 
 import pytest
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from app.models.alert import Alert
 from app.models.company import Company
@@ -253,6 +253,35 @@ class TestAlertTriggering:
         assert notification.user_id == user.id
         assert notification.notification_type == "mos_target"
         assert "Margin of safety" in notification.title
+
+    def test_price_alert_rearms_only_after_cooldown_and_reversal(self, db, user, company):
+        alert = Alert(
+            user_id=user.id, company_id=company.id, alert_type="price_below",
+            condition="price_below_40", threshold_value=40,
+            is_active=True, is_triggered=True, triggered_at=datetime.utcnow(),
+        )
+        db.add(alert)
+        price = PriceHistory(
+            company_id=company.id, price_date=date(2026, 5, 1), close_price=45,
+            source="test", fetched_at=datetime.utcnow(),
+        )
+        db.add(price)
+        db.flush()
+        assert check_and_trigger_alerts(db, company.id) == []
+        assert alert.is_triggered is True  # still inside the cooldown
+        alert.triggered_at = datetime.utcnow() - timedelta(days=2)
+        assert check_and_trigger_alerts(db, company.id) == []
+        assert alert.is_triggered is False  # above 40 * 1.05
+        price.close_price = 39
+        assert len(check_and_trigger_alerts(db, company.id)) == 1
+        assert alert.is_triggered is True
+        assert db.query(Notification).filter(Notification.alert_id == alert.id).count() == 1
+        alert.triggered_at = datetime.utcnow() - timedelta(days=2)
+        price.close_price = 45
+        check_and_trigger_alerts(db, company.id)
+        price.close_price = 39
+        check_and_trigger_alerts(db, company.id)
+        assert db.query(Notification).filter(Notification.alert_id == alert.id).count() == 2
 
     def test_trigger_is_notification_idempotent(self, db, user, company):
         """Repeated evaluator calls must not create duplicate inbox events."""

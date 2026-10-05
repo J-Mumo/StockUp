@@ -104,6 +104,7 @@ def recalculate_all_valuations(self):
                 quality=recommendation.quality,
                 previous_action=old_action,
                 new_action=recommendation.action,
+                bank_metrics=financials[-1].sector_metrics if financials else None,
             )
             notification_ids.extend(notification.id for notification in opportunity_notifications)
 

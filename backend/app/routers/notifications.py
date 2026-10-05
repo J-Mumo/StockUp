@@ -30,6 +30,9 @@ def list_notifications(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    preference = get_or_create_preferences(db, current_user.id)
+    if not preference.in_app_enabled:
+        return NotificationListResponse(notifications=[], unread_count=0)
     query = db.query(Notification).filter(Notification.user_id == current_user.id)
     if unread_only:
         query = query.filter(Notification.read_at.is_(None))

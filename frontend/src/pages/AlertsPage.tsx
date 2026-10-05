@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { Bell, Mail, Plus, Trash2, Check, X } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -115,6 +116,7 @@ export default function AlertsPage() {
     try {
       const response = await notificationsApi.updatePreferences(patch);
       setPreferences(response.data);
+      if (patch.in_app_enabled !== undefined) await loadNotifications();
       toast.success('Notification preferences saved');
     } catch {
       toast.error('Failed to update notification preferences');
@@ -171,6 +173,11 @@ export default function AlertsPage() {
                   <div>
                     <p className="text-sm font-medium text-white">{notification.title}</p>
                     <p className="text-sm text-gray-300 mt-1">{notification.body}</p>
+                    {notification.link_path && (
+                      <Link to={notification.link_path.replace(/^\/stocks\/(\d+)$/, '/companies/$1')} className="text-xs text-primary-400 hover:text-primary-300 mt-2 inline-block">
+                        View company
+                      </Link>
+                    )}
                     <p className="text-xs text-gray-500 mt-2">
                       {new Date(notification.created_at).toLocaleString()} · email {notification.email_status.replace('_', ' ')}
                     </p>
@@ -194,8 +201,12 @@ export default function AlertsPage() {
             <Mail className="text-primary-400" size={19} />
             <h2 className="text-lg font-semibold text-white">Email Notifications</h2>
           </div>
-          <p className="text-sm text-gray-400 mb-4">Emails are sent only to the address used to sign in to StockUp.</p>
+          <p className="text-sm text-gray-400 mb-4">Emails are sent only to the address used to sign in to StockUp. Strong Buy opportunities are always bundled in the daily digest, never emailed immediately.</p>
           <div className="grid md:grid-cols-2 gap-4 text-sm">
+            <label className="flex items-center justify-between gap-3 text-gray-200">
+              In-app inbox
+              <input type="checkbox" checked={preferences.in_app_enabled} onChange={(e) => updatePreferences({ in_app_enabled: e.target.checked })} />
+            </label>
             <label className="flex items-center justify-between gap-3 text-gray-200">
               Email delivery
               <input type="checkbox" checked={preferences.email_enabled} onChange={(e) => updatePreferences({ email_enabled: e.target.checked })} />

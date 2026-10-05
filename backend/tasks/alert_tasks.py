@@ -1,6 +1,6 @@
 """Celery tasks for alert evaluation.
 
-Scheduled daily at 7:30PM EAT (16:30 UTC) via Celery Beat — runs after valuations.
+Scheduled daily at 7:30PM EAT via Celery Beat — runs after valuations.
 """
 
 import logging
@@ -40,10 +40,10 @@ def evaluate_all_alerts(self):
 
     db = SessionLocal()
     try:
-        # Get distinct company_ids that have active, untriggered alerts
+        # Include triggered rules so reversed conditions can re-arm them.
         company_ids = (
             db.query(distinct(Alert.company_id))
-            .filter(Alert.is_active == True, Alert.is_triggered == False)
+            .filter(Alert.is_active == True)
             .all()
         )
         company_ids = [cid[0] for cid in company_ids]
