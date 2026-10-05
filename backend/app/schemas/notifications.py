@@ -15,6 +15,7 @@ class NotificationPreferenceUpdate(BaseModel):
     price_alerts_enabled: bool | None = None
     valuation_alerts_enabled: bool | None = None
     recommendation_alerts_enabled: bool | None = None
+    opportunity_alerts_enabled: bool | None = None
 
 
 class NotificationPreferenceResponse(BaseModel):
@@ -24,6 +25,7 @@ class NotificationPreferenceResponse(BaseModel):
     price_alerts_enabled: bool
     valuation_alerts_enabled: bool
     recommendation_alerts_enabled: bool
+    opportunity_alerts_enabled: bool
 
     model_config = {"from_attributes": True}
 

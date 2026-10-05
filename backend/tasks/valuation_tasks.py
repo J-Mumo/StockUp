@@ -36,7 +36,10 @@ def recalculate_all_valuations(self):
     from app.models.financial_statement import FinancialStatement
     from app.models.intrinsic_value import IntrinsicValue
     from app.services import recommendation_engine
-    from app.services.notification_service import create_recommendation_change_notifications
+    from app.services.notification_service import (
+        create_recommendation_change_notifications,
+        create_strong_buy_opportunity_notifications,
+    )
     from app.services.valuation_engine import compute_all_valuations
 
     started_at = datetime.utcnow()
@@ -93,6 +96,16 @@ def recalculate_all_valuations(self):
                     valuation_id=current_iv.id,
                 )
                 notification_ids.extend(notification.id for notification in created)
+            opportunity_notifications = create_strong_buy_opportunity_notifications(
+                db,
+                company,
+                valuation_id=current_iv.id,
+                margin_of_safety=result.margin_of_safety_pct or 0.0,
+                quality=recommendation.quality,
+                previous_action=old_action,
+                new_action=recommendation.action,
+            )
+            notification_ids.extend(notification.id for notification in opportunity_notifications)
 
         db.commit()
         if notification_ids:

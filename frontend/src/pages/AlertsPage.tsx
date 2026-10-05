@@ -220,6 +220,10 @@ export default function AlertsPage() {
               <input type="checkbox" checked={preferences.valuation_alerts_enabled} onChange={(e) => updatePreferences({ valuation_alerts_enabled: e.target.checked })} />
               Margin-of-safety alerts
             </label>
+            <label className="flex items-center gap-2 text-gray-300">
+              <input type="checkbox" checked={preferences.opportunity_alerts_enabled} onChange={(e) => updatePreferences({ opportunity_alerts_enabled: e.target.checked })} />
+              Unowned Strong Buy opportunities (MOS ≥ 20%)
+            </label>
           </div>
         </section>
       )}

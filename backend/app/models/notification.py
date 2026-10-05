@@ -33,6 +33,7 @@ class NotificationPreference(Base):
     price_alerts_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     valuation_alerts_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     recommendation_alerts_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    opportunity_alerts_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False

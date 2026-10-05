@@ -315,6 +315,7 @@ export interface NotificationPreferences {
   price_alerts_enabled: boolean;
   valuation_alerts_enabled: boolean;
   recommendation_alerts_enabled: boolean;
+  opportunity_alerts_enabled: boolean;
 }
 
 export interface Watchlist {

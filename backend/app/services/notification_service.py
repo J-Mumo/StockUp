@@ -11,7 +11,9 @@ import logging
 import smtplib
 from datetime import datetime
 from email.message import EmailMessage
+from typing import Any
 
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -20,6 +22,7 @@ from app.models.company import Company
 from app.models.notification import Notification, NotificationPreference
 from app.models.user import User
 from app.models.watchlist import Watchlist, WatchlistItem
+from app.models.portfolio import Portfolio, PortfolioTransaction
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +144,80 @@ def create_recommendation_change_notifications(
             ),
             link_path=f"/stocks/{company.id}",
             payload={"previous_action": previous_action, "new_action": new_action},
+            dedupe_key=dedupe_key,
+            email_status="pending",
+        )
+        db.add(notification)
+        db.flush()
+        created.append(notification)
+    return created
+
+
+def create_strong_buy_opportunity_notifications(
+    db: Session,
+    company: Company,
+    *,
+    valuation_id: int,
+    margin_of_safety: float,
+    quality: Any,
+    previous_action: str | None,
+    new_action: str,
+) -> list[Notification]:
+    """Notify opted-in users when an unowned company enters Strong Buy.
+
+    This is a transition notification, not a daily broadcast: it requires a
+    prior non-Strong-Buy action, MOS >= 20%, complete passing core factors,
+    and (for banks) passing asset quality. Positive net transaction quantity
+    excludes companies already held by the user.
+    """
+    if new_action != "Strong Buy" or previous_action == "Strong Buy" or margin_of_safety < 0.20:
+        return []
+    core_indices = [0, 1, 2, 3, 6] if quality.sector_kind == "bank" else [6, 2, 8, 0, 9]
+    core_factors = [quality.factors[index] for index in core_indices]
+    if any(f.insufficient_data or not f.passed for f in core_factors):
+        return []
+    if quality.sector_kind == "bank" and not quality.factors[3].passed:
+        return []
+
+    users = (
+        db.query(User)
+        .join(NotificationPreference, NotificationPreference.user_id == User.id)
+        .filter(
+            User.is_active.is_(True),
+            NotificationPreference.opportunity_alerts_enabled.is_(True),
+        )
+        .all()
+    )
+    created: list[Notification] = []
+    for user in users:
+        held_quantity = (
+            db.query(func.coalesce(func.sum(
+                case(
+                    (PortfolioTransaction.transaction_type == "buy", PortfolioTransaction.quantity),
+                    else_=-PortfolioTransaction.quantity,
+                )
+            ), 0))
+            .join(Portfolio, Portfolio.id == PortfolioTransaction.portfolio_id)
+            .filter(Portfolio.user_id == user.id, PortfolioTransaction.company_id == company.id)
+            .scalar()
+        )
+        if float(held_quantity or 0) > 0:
+            continue
+        dedupe_key = f"opportunity:strong-buy:{valuation_id}:{user.id}"
+        if db.query(Notification.id).filter(Notification.dedupe_key == dedupe_key).first():
+            continue
+        notification = Notification(
+            user_id=user.id,
+            company_id=company.id,
+            notification_type="strong_buy_opportunity",
+            priority="high",
+            title=f"{company.ticker_symbol}: Strong Buy opportunity",
+            body=(
+                f"{company.name} entered Strong Buy with a {margin_of_safety:.0%} margin of safety. "
+                "You do not currently hold this company."
+            ),
+            link_path=f"/stocks/{company.id}",
+            payload={"action": new_action, "margin_of_safety": margin_of_safety},
             dedupe_key=dedupe_key,
             email_status="pending",
         )

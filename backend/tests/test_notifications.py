@@ -5,6 +5,7 @@ from datetime import datetime
 from app.models.notification import Notification
 from app.models.watchlist import Watchlist, WatchlistItem
 from app.services.notification_service import create_recommendation_change_notifications
+from app.services.notification_service import create_strong_buy_opportunity_notifications
 
 
 class TestNotificationInbox:
@@ -75,3 +76,38 @@ class TestNotificationInbox:
             valuation_id=123456,
         )
         assert repeat == []
+
+    def test_strong_buy_opportunity_requires_opt_in_and_unowned(self, db, user, company):
+        from app.models.notification import NotificationPreference
+        from app.services.recommendation_engine import QualityAssessment, QualityScore
+
+        preference = NotificationPreference(user_id=user.id, opportunity_alerts_enabled=True)
+        db.add(preference)
+        db.flush()
+        quality = QualityAssessment(
+            sector_kind="industrial",
+            factors=[
+                QualityScore(name="roe", passed=True),
+                QualityScore(name="capital", passed=True),
+                QualityScore(name="earnings", passed=True),
+                QualityScore(name="dividends", passed=True),
+                QualityScore(name="n/a", passed=True),
+                QualityScore(name="liquidity", passed=True),
+                QualityScore(name="fcf growth", passed=True),
+                QualityScore(name="revenue", passed=True),
+                QualityScore(name="debt", passed=True),
+                QualityScore(name="efficiency", passed=True),
+            ],
+        )
+        created = create_strong_buy_opportunity_notifications(
+            db, company, valuation_id=7001, margin_of_safety=0.25,
+            quality=quality, previous_action="Hold", new_action="Strong Buy",
+        )
+        assert len(created) == 1
+        assert created[0].notification_type == "strong_buy_opportunity"
+
+        # It is an entry transition, not a daily repeat.
+        assert create_strong_buy_opportunity_notifications(
+            db, company, valuation_id=7001, margin_of_safety=0.25,
+            quality=quality, previous_action="Strong Buy", new_action="Strong Buy",
+        ) == []
